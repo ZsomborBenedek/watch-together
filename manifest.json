@@ -1,18 +1,20 @@
 {
     "name": "Watch Together",
     "version": "0.3",
-    "manifest_version": 2,
+    "manifest_version": 3,
     "description": "Synchronized video controlling using WebRTC.",
     "permissions": [
         "storage",
-        "activeTab",
-        "<all_urls>"
+        "activeTab"
+    ],
+    "host_permissions": [
+        "http://*/*",
+        "https://*/*"
     ],
     "background": {
-        "page": "background.html",
-        "persistent": false
+        "service_worker": "background.js"
     },
-    "browser_action": {
+    "action": {
         "default_popup": "popup.html",
         "default_icon": {
             "32": "images/icon32.png",

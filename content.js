@@ -33,7 +33,9 @@ if (window.contentScriptVideo !== true) {
     function sendState() {
         if (video && video.readyState > 2) {
             var videoState = {
-                url: window.location.href,
+                hostname: window.location.hostname,
+                id: video.id,
+                srcLen: video.src.length,
                 isPaused: video.paused,
                 currentTime: video.currentTime
             };
@@ -45,12 +47,17 @@ if (window.contentScriptVideo !== true) {
         }
     }
 
+    function videoEquals(incomingState) {
+        return (window.location.hostname === incomingState.hostname &&
+            video.id === incomingState.id &&
+            video.src.length === incomingState.srcLen) ? true : false;
+    }
+
     chrome.storage.onChanged.addListener(function (changes, namespace) {
         for (var key in changes) {
             if (video && key == 'videoState') {
                 let videoState = changes[key].newValue;
-                let url = window.location.href;
-                if (url.startsWith(videoState.url) || videoState.url.startsWith(url)) {
+                if (videoEquals(videoState)) {
                     if (video.paused !== videoState.isPaused)
                         videoState.isPaused ? video.pause() : video.play();
                     let timediff = Math.abs(video.currentTime - videoState.currentTime).toFixed(1);

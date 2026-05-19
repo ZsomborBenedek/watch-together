@@ -37,21 +37,12 @@ function setState(state) {
 }
 
 function connected(connected) {
-    if (connected) {
-        remoteId.disabled = true;
-        connectButton.hidden = true;
-        disconnectButton.hidden = false;
-        footer.children[0].hidden = true;
-        footer.children[1].hidden = false;
-        vidSync.checked = true;
-    } else {
-        remoteId.disabled = false;
-        connectButton.hidden = false;
-        disconnectButton.hidden = true;
-        footer.children[0].hidden = false;
-        footer.children[1].hidden = true;
-        vidSync.checked = false;
-    }
+    remoteId.disabled = connected ? true : false;
+    connectButton.hidden = connected ? true : false;
+    disconnectButton.hidden = connected ? false : true;
+    footer.children[0].hidden = connected ? true : false;
+    footer.children[1].hidden = connected ? false : true;
+    vidSync.checked = connected ? true : false;
 }
 
 chrome.storage.onChanged.addListener(function (changes, namespace) {
@@ -66,8 +57,8 @@ chrome.storage.onChanged.addListener(function (changes, namespace) {
             remoteId.value = changes[key].newValue;
         else if (key === 'sync') {
             vidSync.checked = changes[key].newValue;
-            vidSync.parentElement.children[1].innerHTML =
-                vidSync.checked ? 'Video syncing <b>on</b>' : 'Video syncing <b>off</b>';
+            vidSync.parentElement.children[1].textContent =
+                vidSync.checked ? 'Video syncing on' : 'Video syncing off';
         }
     }
 });
@@ -77,39 +68,39 @@ window.addEventListener('load', initPopup, false);
 
 function initPopup() {
 
-    chrome.storage.sync.get('state', function (result) {
+    chrome.storage.local.get('state', function (result) {
         setState(result.state);
     });
 
-    chrome.storage.sync.get('connected', function (result) {
+    chrome.storage.local.get('connected', function (result) {
         connected(result.connected);
     });
 
-    chrome.storage.sync.get('ownId', function (result) {
+    chrome.storage.local.get('ownId', function (result) {
         if (result.ownId != null)
             ownId.value = result.ownId;
     });
 
-    chrome.storage.sync.get('remoteId', function (result) {
+    chrome.storage.local.get('remoteId', function (result) {
         if (result.remoteId != null)
             remoteId.value = result.remoteId;
     });
 
-    chrome.storage.sync.get('sync', function (result) {
+    chrome.storage.local.get('sync', function (result) {
         vidSync.checked = result.sync;
-        vidSync.parentElement.children[1].innerHTML =
-            vidSync.checked ? 'Video syncing <b>on</b>' : 'Video syncing <b>off</b>';
+        vidSync.parentElement.children[1].textContent =
+        vidSync.checked ? 'Video syncing on' : 'Video syncing off';
     });
 
     newSessionBtn.addEventListener('click', function () {
         setState('initiate');
-        chrome.storage.sync.set({ state: 'initiate' }, function () { });
+        chrome.storage.local.set({ state: 'initiate' }, function () { });
         chrome.runtime.sendMessage({ action: 'newSession' });
     }, false);
 
     joinSessionBtn.addEventListener('click', function () {
         setState('join');
-        chrome.storage.sync.set({ state: 'join' }, function () { });
+        chrome.storage.local.set({ state: 'join' }, function () { });
     }, false);
 
     copyButton.addEventListener('click', function () {
@@ -132,6 +123,6 @@ function initPopup() {
     }, false);
 
     vidSync.addEventListener('click', function () {
-        chrome.storage.sync.set({ sync: vidSync.checked }, function () { });
+        chrome.storage.local.set({ sync: vidSync.checked }, function () { });
     });
 }

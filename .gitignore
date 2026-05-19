@@ -1,3 +1,6 @@
 node_modules
 package-lock.json
 dist/
+.web-extension-id
+*.xpi
+*.zip

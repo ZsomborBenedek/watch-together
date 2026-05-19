@@ -1,6 +1,6 @@
 # WatchTogether
 
-Chrome extension that synchronizes video playback using WebRTC on any site that has HTML video. 2 peers can connect to each other and each can control the same video by pausing / playing or seeking theirs.
+Browser extension that synchronizes video playback using WebRTC on any site that has HTML video. 2 peers can connect to each other and each can control the same video by pausing / playing or seeking theirs.
 
 This is just a simple extension and completely serverless so the peers have to exchange their signaling data by another platform in order to be connected.
 

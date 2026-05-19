@@ -16,10 +16,7 @@ chrome.runtime.onInstalled.addListener(function () {
 
 function keepAlive() {
     if (active) {
-        setTimeout(() => {
-            chrome.runtime.getBackgroundPage(_ => { });
-            keepAlive();
-        }, 4000);
+        setTimeout(keepAlive, 4000);
     }
 }
 
@@ -39,13 +36,17 @@ function syncVids(_sync) {
 }
 
 function injectContentScript() {
-    chrome.tabs.executeScript({
-        file: 'content.js'
-    }, _ => {
-        let e = chrome.runtime.lastError;
-        if (e !== undefined) {
-            console.log(_, e);
-        }
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        if (tabs.length === 0) return;
+        chrome.scripting.executeScript({
+            target: { tabId: tabs[0].id },
+            files: ['content.js']
+        }, _ => {
+            let e = chrome.runtime.lastError;
+            if (e !== undefined) {
+                console.log(_, e);
+            }
+        });
     });
 }
 

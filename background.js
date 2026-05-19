@@ -7,11 +7,11 @@ let sync;
 chrome.runtime.onInstalled.addListener(function () {
     console.log("Watchtogether extension installed!");
 
-    chrome.storage.sync.set({ ownId: null }, function () { });
-    chrome.storage.sync.set({ remoteId: null }, function () { });
-    chrome.storage.sync.set({ state: 'start' }, function () { });
-    chrome.storage.sync.set({ connected: false }, function () { });
-    chrome.storage.sync.set({ sync: false }, function () { });
+    chrome.storage.local.set({ ownId: null }, function () { });
+    chrome.storage.local.set({ remoteId: null }, function () { });
+    chrome.storage.local.set({ state: 'start' }, function () { });
+    chrome.storage.local.set({ connected: false }, function () { });
+    chrome.storage.local.set({ sync: false }, function () { });
 });
 
 function keepAlive() {
@@ -75,17 +75,17 @@ function newSession(initiator) {
         active = true;
         keepAlive();
         let id = btoa(JSON.stringify(data));
-        chrome.storage.sync.set({ ownId: id }, function () {
+        chrome.storage.local.set({ ownId: id }, function () {
             console.log('signaled as ', id);
         });
     });
 
     // When another peer connects to this one
     peer.on('connect', function () {
-        chrome.storage.sync.set({ connected: true }, function () {
+        chrome.storage.local.set({ connected: true }, function () {
             console.log('connected');
         });
-        chrome.storage.sync.set({ sync: true }, function () { });
+        chrome.storage.local.set({ sync: true }, function () { });
         sync = true;
     });
 
@@ -94,7 +94,7 @@ function newSession(initiator) {
         if (sync) {
             let videoState = JSON.parse(atob(data));
             console.log(videoState);
-            chrome.storage.sync.set({ videoState: videoState }, function () { });
+            chrome.storage.local.set({ videoState: videoState }, function () { });
         }
     });
 
@@ -109,7 +109,7 @@ function newSession(initiator) {
 function joinSession(remoteId) {
     try {
         peer.signal(JSON.parse(atob(remoteId)));
-        chrome.storage.sync.set({ remoteId: remoteId }, function () { });
+        chrome.storage.local.set({ remoteId: remoteId }, function () { });
     } catch (error) {
         console.log(error);
     }
@@ -119,11 +119,11 @@ function disconnectPeers() {
     if (peer) {
         peer.destroy();
     } else {
-        chrome.storage.sync.set({ ownId: null }, function () { });
-        chrome.storage.sync.set({ remoteId: null }, function () { });
-        chrome.storage.sync.set({ state: 'start' }, function () { });
-        chrome.storage.sync.set({ connected: false }, function () { });
-        chrome.storage.sync.set({ sync: false }, function () { });
+        chrome.storage.local.set({ ownId: null }, function () { });
+        chrome.storage.local.set({ remoteId: null }, function () { });
+        chrome.storage.local.set({ state: 'start' }, function () { });
+        chrome.storage.local.set({ connected: false }, function () { });
+        chrome.storage.local.set({ sync: false }, function () { });
     }
 }
 
@@ -150,8 +150,8 @@ chrome.storage.onChanged.addListener(function (changes, namespace) {
     }
 });
 
-chrome.runtime.onSuspend.addListener(function () {
-    console.log("Watchtogether extension suspended!");
+// chrome.runtime.onSuspend.addListener(function () {
+//     console.log("Watchtogether extension suspended!");
 
-    disconnectPeers();
-});
+//     disconnectPeers();
+// });

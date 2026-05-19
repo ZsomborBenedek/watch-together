@@ -1,8 +1,3 @@
-body {
-    width: 300px;
-    padding: 5px;
-}
-
 .infoText {
     text-align: center;
     color: gray;
@@ -11,18 +6,18 @@ body {
 #start,
 #initiator,
 #joiner {
-    margin: 10px;
+    margin: 0.7rem;
 }
 
 #footer {
     width: 100%;
-    padding: 0px;
-    margin: 0px;
+    padding: 0rem;
+    margin: 0rem;
 }
 
 #backBtn {
-    padding: 0px;
-    margin: 0px;
+    padding: 0rem;
+    margin: 0rem;
 }
 
 .custom-control-input-red:focus~.custom-control-label::before {

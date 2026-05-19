@@ -1,0 +1,15 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "ghcr.io/devcontainers/features/node:2.0.0": {
+      "version": "lts"
+    }
+  },
+  "remoteUser": "vscode",
+  "mounts": [
+    "source=claude-code-config,target=/home/vscode/.claude,type=volume"
+  ],
+  "onCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude",
+  "postCreateCommand": "npm install -g web-ext"
+}

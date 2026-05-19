@@ -1,5 +1,9 @@
 'use strict';
 
+if (typeof importScripts !== 'undefined') {
+    importScripts('external/simplepeer.min.js');
+}
+
 let peer;
 let active;
 let sync;

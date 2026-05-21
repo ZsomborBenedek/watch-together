@@ -5,7 +5,7 @@
     "description": "Synchronized video controlling using WebRTC.",
     "browser_specific_settings": {
         "gecko": {
-            "id": "watch-together@extension",
+            "id": "{be7e9567-632c-47dc-bcb0-af29eda39f51}",
             "strict_min_version": "142.0",
             "data_collection_permissions": {
                 "required": ["none"],

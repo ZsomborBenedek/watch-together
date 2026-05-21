@@ -1,6 +1,6 @@
 {
     "name": "Watch Together",
-    "version": "0.3",
+    "version": "1.0",
     "manifest_version": 3,
     "description": "Synchronized video controlling using WebRTC.",
     "browser_specific_settings": {

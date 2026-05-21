@@ -4,3 +4,4 @@ dist/
 .web-extension-id
 *.xpi
 *.zip
+.DS_Store

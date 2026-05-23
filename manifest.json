@@ -17,7 +17,8 @@
         "storage",
         "activeTab",
         "scripting",
-        "tabs"
+        "tabs",
+        "offscreen"
     ],
     "host_permissions": [
         "http://*/*",

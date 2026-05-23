@@ -15,8 +15,10 @@ build_common() {
 
 build_common build/chrome
 cp manifest.json build/chrome/manifest.json
+cp offscreen.html offscreen.js build/chrome/
 echo "Chrome build ready in build/chrome/"
 
 build_common build/firefox
 cp manifest.firefox.json build/firefox/manifest.json
+cp background.firefox.js build/firefox/background.js
 echo "Firefox build ready in build/firefox/"

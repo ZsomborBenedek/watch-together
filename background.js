@@ -1,38 +1,35 @@
 'use strict';
 
-if (typeof importScripts !== 'undefined') {
-    importScripts('external/simplepeer.min.js');
-}
+let syncEnabled = false;
 
-let peer;
-let active;
-let sync;
+async function ensureOffscreen() {
+    if (await chrome.offscreen.hasDocument()) return;
+    await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: [chrome.offscreen.Reason.WEB_RTC],
+        justification: 'WebRTC peer connection requires DOM APIs unavailable in service workers'
+    });
+}
 
 chrome.runtime.onInstalled.addListener(function () {
     console.log("Watchtogether extension installed!");
-
-    chrome.storage.local.set({ ownId: null }, function () { });
-    chrome.storage.local.set({ remoteId: null }, function () { });
-    chrome.storage.local.set({ state: 'start' }, function () { });
-    chrome.storage.local.set({ connected: false }, function () { });
-    chrome.storage.local.set({ sync: false }, function () { });
+    chrome.storage.local.set({ ownId: null });
+    chrome.storage.local.set({ remoteId: null });
+    chrome.storage.local.set({ state: 'start' });
+    chrome.storage.local.set({ connected: false });
+    chrome.storage.local.set({ sync: false });
+    ensureOffscreen();
 });
 
-function keepAlive() {
-    if (active) {
-        setTimeout(keepAlive, 4000);
-    }
-}
+chrome.runtime.onStartup.addListener(ensureOffscreen);
 
 function syncVids(_sync) {
     if (_sync) {
-        sync = true;
         injectContentScript();
         console.log('vids syncing');
         chrome.tabs.onActivated.addListener(injectContentScriptToActivated);
         chrome.tabs.onUpdated.addListener(injectContentScriptToUpdated);
     } else {
-        sync = false;
         console.log('vids not syncing');
         chrome.tabs.onActivated.removeListener(injectContentScriptToActivated);
         chrome.tabs.onUpdated.removeListener(injectContentScriptToUpdated);
@@ -42,14 +39,14 @@ function syncVids(_sync) {
 function injectContentScript() {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
         if (tabs.length === 0) return;
+        const tab = tabs[0];
+        if (!tab.url || !tab.url.startsWith('http')) return;
         chrome.scripting.executeScript({
-            target: { tabId: tabs[0].id },
+            target: { tabId: tab.id },
             files: ['content.js']
         }, _ => {
             let e = chrome.runtime.lastError;
-            if (e !== undefined) {
-                console.log(_, e);
-            }
+            if (e !== undefined) console.log(_, e);
         });
     });
 }
@@ -59,104 +56,41 @@ function injectContentScriptToActivated(activeInfo) {
 }
 
 function injectContentScriptToUpdated(tabId, changeInfo, tab) {
-    if (changeInfo.status === 'complete') {
-        injectContentScript();
-    }
+    if (changeInfo.status === 'complete') injectContentScript();
 }
 
-function newSession(initiator) {
-    peer = new SimplePeer({
-        initiator: initiator ? true : false,
-        trickle: false
-    });
+chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+    if (request.target === 'offscreen') return;
 
-    // When there is peer error
-    peer.on('error', function (err) {
-        console.log(err);
-    });
+    // Storage relay: offscreen documents can't reliably access chrome.storage
+    if (request.action === 'storeData') {
+        chrome.storage.local.set(request.data);
+        return;
+    }
 
-    // When peer is made
-    peer.on('signal', function (data) {
-        active = true;
-        keepAlive();
-        let id = btoa(JSON.stringify(data));
-        chrome.storage.local.set({ ownId: id }, function () {
-            console.log('signaled as ', id);
+    if (request.action === 'storeVideoState') {
+        if (syncEnabled) chrome.storage.local.set({ videoState: request.videoState });
+        return;
+    }
+
+    const directActions = ['newSession', 'joinSession', 'disconnectPeers'];
+    if (directActions.includes(request.action)) {
+        ensureOffscreen().then(() => {
+            chrome.runtime.sendMessage({ ...request, target: 'offscreen' });
         });
-    });
-
-    // When another peer connects to this one
-    peer.on('connect', function () {
-        chrome.storage.local.set({ connected: true }, function () {
-            console.log('connected');
-        });
-        chrome.storage.local.set({ sync: true }, function () { });
-        sync = true;
-    });
-
-    // When data is received
-    peer.on('data', function (data) {
-        if (sync) {
-            let videoState = JSON.parse(atob(data));
-            console.log(videoState);
-            chrome.storage.local.set({ videoState: videoState }, function () { });
-        }
-    });
-
-    // When peers are disconnected
-    peer.on('close', function () {
-        peer = null;
-        active = false;
-        disconnectPeers();
-    });
-}
-
-function joinSession(remoteId) {
-    try {
-        peer.signal(JSON.parse(atob(remoteId)));
-        chrome.storage.local.set({ remoteId: remoteId }, function () { });
-    } catch (error) {
-        console.log(error);
-    }
-}
-
-function disconnectPeers() {
-    if (peer) {
-        peer.destroy();
-    } else {
-        chrome.storage.local.set({ ownId: null }, function () { });
-        chrome.storage.local.set({ remoteId: null }, function () { });
-        chrome.storage.local.set({ state: 'start' }, function () { });
-        chrome.storage.local.set({ connected: false }, function () { });
-        chrome.storage.local.set({ sync: false }, function () { });
-    }
-}
-
-// Receiving messages
-chrome.runtime.onMessage.addListener(function (request, _sender, sendResponse) {
-    if (request.action === 'newSession') {
-        newSession(true);
-    } else if (request.action === 'joinSession') {
-        if (!peer)
-            newSession(false);
-        joinSession(request.remoteId);
-    } else if (request.action === 'disconnectPeers') {
-        disconnectPeers();
     } else if (request.action === 'sendState') {
-        if (peer && sync)
-            peer.send(btoa(JSON.stringify(request.content)));
+        if (!syncEnabled) return;
+        ensureOffscreen().then(() => {
+            chrome.runtime.sendMessage({ ...request, target: 'offscreen' });
+        });
     }
 });
 
 chrome.storage.onChanged.addListener(function (changes, namespace) {
     for (var key in changes) {
-        if (key === 'sync')
+        if (key === 'sync') {
+            syncEnabled = changes[key].newValue;
             syncVids(changes[key].newValue);
+        }
     }
 });
-
-// chrome.runtime.onSuspend.addListener(function () {
-//     console.log("Watchtogether extension suspended!");
-
-//     disconnectPeers();
-// });

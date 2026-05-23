@@ -61,7 +61,10 @@ function injectContentScriptToUpdated(tabId, changeInfo, tab) {
 function newSession(initiator) {
     peer = new SimplePeer({ initiator: !!initiator, trickle: false });
 
-    peer.on('error', err => console.log(err));
+    peer.on('error', err => {
+        console.log(err);
+        if (peer) peer.destroy();
+    });
 
     peer.on('signal', data => {
         active = true;
@@ -98,6 +101,7 @@ function joinSession(remoteId) {
         chrome.storage.local.set({ remoteId });
     } catch (error) {
         console.log(error);
+        disconnectPeers();
     }
 }
 

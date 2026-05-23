@@ -15,9 +15,17 @@ function store(data) {
 function newSession(initiator) {
     peer = new SimplePeer({ initiator: !!initiator, trickle: false });
 
-    peer.on('error', err => console.log(err));
+    peer.on('error', err => {
+        console.log(err);
+        if (peer) peer.destroy();
+    });
+
+    // Chrome throttles offscreen document JS callbacks; a frequent interval
+    // keeps the event loop warm so ICE gathering state changes fire promptly.
+    const gatheringKeepAlive = setInterval(() => {}, 50);
 
     peer.on('signal', data => {
+        clearInterval(gatheringKeepAlive);
         active = true;
         keepAlive();
         const id = btoa(JSON.stringify(data));
@@ -50,6 +58,7 @@ function joinSession(remoteId) {
         store({ remoteId });
     } catch (error) {
         console.log(error);
+        disconnectPeers();
     }
 }
 

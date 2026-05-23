@@ -16,7 +16,10 @@ chrome.runtime.onInstalled.addListener(function () {
     chrome.storage.local.set({ state: 'start' });
     chrome.storage.local.set({ connected: false });
     chrome.storage.local.set({ sync: false });
+    ensureOffscreen();
 });
+
+chrome.runtime.onStartup.addListener(ensureOffscreen);
 
 function syncVids(_sync) {
     if (_sync) {

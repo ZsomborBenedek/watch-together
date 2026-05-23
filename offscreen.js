@@ -2,6 +2,14 @@
 
 let peer;
 let active;
+let gatheringKeepAlive;
+
+function clearGatheringKeepAlive() {
+    if (gatheringKeepAlive) {
+        clearInterval(gatheringKeepAlive);
+        gatheringKeepAlive = null;
+    }
+}
 
 function keepAlive() {
     if (active) setTimeout(keepAlive, 4000);
@@ -17,15 +25,17 @@ function newSession(initiator) {
 
     peer.on('error', err => {
         console.log(err);
+        clearGatheringKeepAlive();
         if (peer) peer.destroy();
     });
 
     // Chrome throttles offscreen document JS callbacks; a frequent interval
     // keeps the event loop warm so ICE gathering state changes fire promptly.
-    const gatheringKeepAlive = setInterval(() => {}, 50);
+    clearGatheringKeepAlive();
+    gatheringKeepAlive = setInterval(() => {}, 50);
 
     peer.on('signal', data => {
-        clearInterval(gatheringKeepAlive);
+        clearGatheringKeepAlive();
         active = true;
         keepAlive();
         const id = btoa(JSON.stringify(data));
@@ -40,12 +50,17 @@ function newSession(initiator) {
     });
 
     peer.on('data', data => {
-        const videoState = JSON.parse(atob(data));
-        console.log(videoState);
-        chrome.runtime.sendMessage({ action: 'storeVideoState', videoState });
+        try {
+            const videoState = JSON.parse(atob(data));
+            console.log(videoState);
+            chrome.runtime.sendMessage({ action: 'storeVideoState', videoState });
+        } catch (e) {
+            console.log('invalid peer data', e);
+        }
     });
 
     peer.on('close', () => {
+        clearGatheringKeepAlive();
         peer = null;
         active = false;
         disconnectPeers();
@@ -63,6 +78,7 @@ function joinSession(remoteId) {
 }
 
 function disconnectPeers() {
+    clearGatheringKeepAlive();
     if (peer) {
         peer.destroy();
     } else {

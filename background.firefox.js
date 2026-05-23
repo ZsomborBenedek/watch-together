@@ -75,6 +75,7 @@ function newSession(initiator) {
     });
 
     peer.on('connect', () => {
+        sync = true;
         chrome.storage.local.set({ connected: true });
         chrome.storage.local.set({ sync: true });
         console.log('connected');
@@ -82,15 +83,20 @@ function newSession(initiator) {
 
     peer.on('data', data => {
         if (sync) {
-            const videoState = JSON.parse(atob(data));
-            console.log(videoState);
-            chrome.storage.local.set({ videoState });
+            try {
+                const videoState = JSON.parse(atob(data));
+                console.log(videoState);
+                chrome.storage.local.set({ videoState });
+            } catch (e) {
+                console.log('invalid peer data', e);
+            }
         }
     });
 
     peer.on('close', () => {
         peer = null;
         active = false;
+        sync = false;
         disconnectPeers();
     });
 }
@@ -106,6 +112,7 @@ function joinSession(remoteId) {
 }
 
 function disconnectPeers() {
+    sync = false;
     if (peer) {
         peer.destroy();
     } else {

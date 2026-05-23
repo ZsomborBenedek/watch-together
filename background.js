@@ -1,5 +1,7 @@
 'use strict';
 
+let syncEnabled = false;
+
 async function ensureOffscreen() {
     if (await chrome.offscreen.hasDocument()) return;
     await chrome.offscreen.createDocument({
@@ -67,9 +69,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     }
 
     if (request.action === 'storeVideoState') {
-        chrome.storage.local.get('sync', result => {
-            if (result.sync) chrome.storage.local.set({ videoState: request.videoState });
-        });
+        if (syncEnabled) chrome.storage.local.set({ videoState: request.videoState });
         return;
     }
 
@@ -79,19 +79,18 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             chrome.runtime.sendMessage({ ...request, target: 'offscreen' });
         });
     } else if (request.action === 'sendState') {
-        // Check sync here so offscreen doesn't need chrome.storage.get
-        chrome.storage.local.get('sync', result => {
-            if (!result.sync) return;
-            ensureOffscreen().then(() => {
-                chrome.runtime.sendMessage({ ...request, target: 'offscreen' });
-            });
+        if (!syncEnabled) return;
+        ensureOffscreen().then(() => {
+            chrome.runtime.sendMessage({ ...request, target: 'offscreen' });
         });
     }
 });
 
 chrome.storage.onChanged.addListener(function (changes, namespace) {
     for (var key in changes) {
-        if (key === 'sync')
+        if (key === 'sync') {
+            syncEnabled = changes[key].newValue;
             syncVids(changes[key].newValue);
+        }
     }
 });

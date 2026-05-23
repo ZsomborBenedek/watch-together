@@ -24,7 +24,7 @@
         "https://*/*"
     ],
     "background": {
-        "service_worker": "background.js"
+        "scripts": ["external/simplepeer.min.js", "background.js"]
     },
     "action": {
         "default_popup": "popup.html",

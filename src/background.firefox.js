@@ -42,7 +42,7 @@ function injectContentScript() {
         if (!tab.url || !tab.url.startsWith('http')) return;
         chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            files: ['content.js']
+            files: ['src/content.js']
         }, _ => {
             let e = chrome.runtime.lastError;
             if (e !== undefined) console.log(_, e);

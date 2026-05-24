@@ -5,7 +5,7 @@ let syncEnabled = false;
 async function ensureOffscreen() {
     if (await chrome.offscreen.hasDocument()) return;
     await chrome.offscreen.createDocument({
-        url: 'offscreen.html',
+        url: 'src/offscreen.html',
         reasons: [chrome.offscreen.Reason.WEB_RTC],
         justification: 'WebRTC peer connection requires DOM APIs unavailable in service workers'
     });
@@ -43,7 +43,7 @@ function injectContentScript() {
         if (!tab.url || !tab.url.startsWith('http')) return;
         chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            files: ['content.js']
+            files: ['src/content.js']
         }, _ => {
             let e = chrome.runtime.lastError;
             if (e !== undefined) console.log(_, e);

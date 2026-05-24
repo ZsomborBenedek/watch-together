@@ -1,9 +1,0 @@
-node_modules/
-dist/
-web-ext-artifacts/
-background.html
-*.sh
-*.md
-*.map
-package-lock.json
-.webextignore

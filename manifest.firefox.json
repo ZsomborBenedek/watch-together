@@ -24,10 +24,10 @@
         "https://*/*"
     ],
     "background": {
-        "scripts": ["external/simplepeer.min.js", "background.js"]
+        "scripts": ["external/simplepeer.min.js", "src/background.firefox.js"]
     },
     "action": {
-        "default_popup": "popup.html",
+        "default_popup": "src/popup.html",
         "default_icon": {
             "32": "images/icon32.png",
             "64": "images/icon64.png",

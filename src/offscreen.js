@@ -45,7 +45,7 @@ function newSession(initiator) {
 
     peer.on('connect', () => {
         store({ connected: true });
-        store({ sync: true });
+        store({ sync: 'all' });
         console.log('connected');
     });
 
@@ -86,7 +86,7 @@ function disconnectPeers() {
         store({ remoteId: null });
         store({ state: 'start' });
         store({ connected: false });
-        store({ sync: false });
+        store({ sync: 'none' });
     }
 }
 

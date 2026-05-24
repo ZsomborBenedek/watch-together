@@ -51,8 +51,9 @@ chrome.storage.onChanged.addListener(function (changes, namespace) {
             connected(changes[key].newValue);
         else if (key === 'state')
             setState(changes[key].newValue);
-        else if (key === 'ownId')
+        else if (key === 'ownId') {
             ownId.value = changes[key].newValue;
+        }
         else if (key === 'remoteId')
             remoteId.value = changes[key].newValue;
         else if (key === 'sync') {
@@ -110,8 +111,9 @@ function initPopup() {
     }, false);
 
     connectButton.addEventListener('click', function () {
-        if (remoteId.value.length > 0)
+        if (remoteId.value.length > 0) {
             chrome.runtime.sendMessage({ action: 'joinSession', remoteId: remoteId.value });
+        }
     }, false);
 
     disconnectButton.addEventListener('click', function () {

@@ -112,6 +112,7 @@ function joinSession(remoteId) {
 }
 
 function disconnectPeers() {
+    active = false;
     sync = false;
     if (peer) {
         peer.destroy();

@@ -32,7 +32,7 @@ if (window.contentScriptVideo !== true) {
 
     function sendState() {
         if (video && video.readyState > 2) {
-            var videoState = {
+            const videoState = {
                 hostname: window.location.hostname,
                 id: video.id,
                 srcLen: video.src.length,
@@ -48,9 +48,9 @@ if (window.contentScriptVideo !== true) {
     }
 
     function videoEquals(incomingState) {
-        return (window.location.hostname === incomingState.hostname &&
+        return window.location.hostname === incomingState.hostname &&
             video.id === incomingState.id &&
-            video.src.length === incomingState.srcLen) ? true : false;
+            video.src.length === incomingState.srcLen;
     }
 
     chrome.storage.onChanged.addListener(function (changes, namespace) {
@@ -60,7 +60,7 @@ if (window.contentScriptVideo !== true) {
                 if (videoEquals(videoState)) {
                     if (video.paused !== videoState.isPaused)
                         videoState.isPaused ? video.pause() : video.play();
-                    let timediff = Math.abs(video.currentTime - videoState.currentTime).toFixed(1);
+                    const timediff = Math.abs(video.currentTime - videoState.currentTime);
                     if (timediff > toffset && video.readyState > 2) {
                         video.currentTime = videoState.currentTime;
                     }

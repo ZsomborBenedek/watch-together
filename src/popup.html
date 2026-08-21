@@ -51,11 +51,14 @@
 
   <div id="settings">
     <button id="settingsBtn" class="btn btn-link infoText settingsToggle">Relay server</button>
-    <div id="settingsPanel" class="input-group" hidden>
-      <input type="text" id="relayUrl" class="form-control" placeholder="wss://&hellip;.workers.dev" autocomplete="off" />
-      <div class="input-group-append">
-        <button id="saveRelayBtn" class="btn btn-md btn-outline-dark m-0 px-3">Save</button>
+    <div id="settingsPanel" hidden>
+      <div class="input-group">
+        <input type="text" id="relayUrl" class="form-control" placeholder="wss://&hellip;" autocomplete="off" />
+        <div class="input-group-append">
+          <button id="saveRelayBtn" class="btn btn-md btn-outline-dark m-0 px-3">Save</button>
+        </div>
       </div>
+      <div id="relayHint" class="infoText settingsHint">Leave empty to use the built-in relay.</div>
     </div>
   </div>
 

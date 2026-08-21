@@ -79,3 +79,13 @@ body {
     margin: 0rem;
     font-size: 0.75rem;
 }
+
+.settingsHint {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.7rem;
+}
+
+.settingsHint.warning {
+    color: #dc3545;
+}

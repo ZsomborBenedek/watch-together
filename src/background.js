@@ -321,6 +321,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         joinSession(request.roomCode);
     } else if (request.action === 'leaveSession') {
         leaveSession();
+    } else if (request.action === 'relayChanged') {
+        // Reopen the same room against the newly configured relay.
+        if (roomCode) {
+            chrome.storage.local.set({ connected: false });
+            openSocket(roomCode);
+        }
     } else if (request.action === 'sendState') {
         if (!syncEnabled) return;
         if (syncMode === 'page' && sender.tab?.id !== syncTabId) return;

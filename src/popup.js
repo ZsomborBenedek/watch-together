@@ -17,10 +17,13 @@ const backBtn = document.getElementById('backBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const saveRelayBtn = document.getElementById('saveRelayBtn');
 const relayUrl = document.getElementById('relayUrl');
+const relayHint = document.getElementById('relayHint');
 const syncToggle = document.getElementById('syncToggle');
 const syncBtns = document.querySelectorAll('.sync-btn');
 
 let lastError = null;
+
+const DEFAULT_HINT = 'Leave empty to use the built-in relay.';
 
 // 'start'   — no session
 // 'join'    — entering someone else's code
@@ -51,6 +54,22 @@ function setConnected(isConnected) {
         statusText.textContent = 'Connected — your friend is here.';
     } else {
         statusText.textContent = 'Waiting for your friend to join…';
+    }
+}
+
+function setRelayHint(message, isError) {
+    relayHint.textContent = message || DEFAULT_HINT;
+    relayHint.classList.toggle('warning', !!isError);
+}
+
+// Only ws:// and wss:// can ever work here, and rejecting anything else up
+// front beats letting it surface later as an opaque connection failure.
+function isRelayUrl(value) {
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
+    } catch (e) {
+        return false;
     }
 }
 
@@ -127,8 +146,16 @@ function initPopup() {
 
     saveRelayBtn.addEventListener('click', function () {
         const url = relayUrl.value.trim();
+        if (url.length > 0 && !isRelayUrl(url)) {
+            setRelayHint('Must start with wss:// or ws://', true);
+            return;
+        }
+        // An empty field clears the override and falls back to the built-in relay.
         chrome.storage.local.set({ relayUrl: url || null }, function () {
-            saveRelayBtn.innerHTML = 'Saved!';
+            setRelayHint(url ? 'Saved.' : 'Saved — using the built-in relay.');
+            // The socket URL is built when connecting, so an open session has to
+            // be reopened before a new relay actually takes effect.
+            chrome.runtime.sendMessage({ action: 'relayChanged' });
         });
     }, false);
 

@@ -34,7 +34,24 @@ are ignored, so `ABC-DEF-GHI` and `abcdefghi` are the same room.
 | client → server | `{"t":"state","v":{…}}` | Playback state; relayed verbatim to every other client. |
 | client → server | `ping` | Heartbeat. Auto-answered with `pong` without waking the DO. |
 
-Rooms hold at most 8 clients and drop messages over 4096 bytes.
+### Limits
+
+Each is set just above what video sync needs, so the relay is not useful as a
+general-purpose message bus. All four constrain the envelope rather than the
+contents, so they keep working if payloads are ever encrypted end to end.
+
+| Limit | Value | Real usage |
+|---|---|---|
+| Clients per room | 4 | 2 |
+| Message size | 512 chars | ~110 |
+| Message rate | 20 per 10s per socket | a handful per session |
+| Session lifetime | 6 hours | one film |
+| Stale socket | closed after 5 min of silence | pings every 20s |
+
+Over-limit messages are dropped rather than closing the socket, since scrubbing
+a video can burst `seeked` events. Dead sockets are swept when the room next
+sees activity, which returns their slot before the capacity check — an idle room
+is hibernated and has nothing to reclaim.
 
 ## Costs
 

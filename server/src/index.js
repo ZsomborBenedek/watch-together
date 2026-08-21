@@ -7,8 +7,32 @@
 // It never parses or stores the payload, so the server learns nothing about
 // what anyone is watching beyond message sizes and timing.
 
-const MAX_CLIENTS = 8;
-const MAX_MESSAGE_BYTES = 4096;
+// Envelope limits. Each is set just above what video sync actually needs: a
+// real state frame is ~110 characters and arrives a handful of times per
+// session. The narrower the accepted behaviour, the less this relay is worth
+// to anyone looking for a general-purpose message bus — which is a more
+// durable defence than gating the door, since it removes the prize rather
+// than taxing access to it.
+//
+// All four survive end-to-end encryption, because they constrain the envelope
+// rather than the contents. 512 characters leaves room for an encrypted frame
+// (~180 bytes) without revisiting this.
+const MAX_CLIENTS = 4;
+const MAX_MESSAGE_CHARS = 512;
+
+// Over-limit messages are dropped rather than closing the socket: scrubbing a
+// video can burst `seeked` events, and losing the session over that would be
+// worse than the traffic it saves.
+const RATE_WINDOW_MS = 10000;
+const RATE_MAX_MESSAGES = 20;
+
+// Longer than any film, so a real viewer never trips it, while still bounding
+// how long a parasitic connection can be held open.
+const MAX_SESSION_MS = 6 * 60 * 60 * 1000;
+
+// A live client pings every 20s, so silence this long means the socket is
+// dead and its slot should go back to the room.
+const STALE_SOCKET_MS = 5 * 60 * 1000;
 
 export class Room {
     constructor(state, env) {
@@ -28,7 +52,13 @@ export class Room {
             return new Response('expected a websocket upgrade', { status: 426 });
         }
 
-        if (this.state.getWebSockets().length >= MAX_CLIENTS) {
+        // Reclaim slots from dead sockets first, or a crashed peer locks its
+        // partner out of their own room until the socket eventually times out.
+        // close() only starts the closing handshake, so the swept sockets are
+        // still listed here — count what sweep reports as live instead.
+        const live = this.sweep();
+
+        if (live.length >= MAX_CLIENTS) {
             return new Response('room is full', { status: 403 });
         }
 
@@ -37,6 +67,12 @@ export class Room {
         // Hibernatable: the DO can be evicted between messages and the socket
         // stays open, so an idle room costs nothing.
         this.state.acceptWebSocket(server);
+
+        // Rate and lifetime counters live in the attachment because instance
+        // memory does not survive hibernation.
+        const now = Date.now();
+        server.serializeAttachment({ opened: now, windowStart: now, count: 0, seen: now });
+
         this.announcePeers();
 
         return new Response(null, { status: 101, webSocket: client });
@@ -45,9 +81,62 @@ export class Room {
     webSocketMessage(ws, message) {
         // Binary frames and oversized payloads are not part of the protocol.
         if (typeof message !== 'string') return;
-        if (message.length > MAX_MESSAGE_BYTES) return;
+        if (message.length > MAX_MESSAGE_CHARS) return;
+        if (!this.withinRateLimit(ws)) return;
 
+        this.sweep();
         this.sendAll(message, ws);
+    }
+
+    // Fixed window per socket. Returns false for messages over the allowance,
+    // which are then dropped; the socket itself is left alone.
+    withinRateLimit(ws) {
+        const now = Date.now();
+        const state = ws.deserializeAttachment() ||
+            { opened: now, windowStart: now, count: 0, seen: now };
+
+        if (now - state.windowStart > RATE_WINDOW_MS) {
+            state.windowStart = now;
+            state.count = 0;
+        }
+        state.count++;
+        state.seen = now;
+        ws.serializeAttachment(state);
+
+        return state.count <= RATE_MAX_MESSAGES;
+    }
+
+    // Closes sockets that have outlived a plausible session or gone silent,
+    // and returns the ones still live. Runs on activity only: an idle room is
+    // hibernated and costs nothing, so there is nothing there to reclaim.
+    sweep() {
+        const now = Date.now();
+        const live = [];
+        for (const socket of this.state.getWebSockets()) {
+            const state = socket.deserializeAttachment();
+            if (!state) {
+                live.push(socket);
+                continue;
+            }
+
+            // Heartbeats are auto-answered without waking this object, so the
+            // runtime timestamp is the only evidence a quiet socket is alive.
+            const auto = this.state.getWebSocketAutoResponseTimestamp(socket);
+            const lastSeen = Math.max(state.seen || 0, auto ? auto.getTime() : 0);
+
+            const expired = now - state.opened > MAX_SESSION_MS;
+            const stale = now - lastSeen > STALE_SOCKET_MS;
+            if (expired || stale) {
+                try {
+                    socket.close(1000, expired ? 'session expired' : 'connection stale');
+                } catch (e) {
+                    // Already closing; the close handler will tidy up.
+                }
+            } else {
+                live.push(socket);
+            }
+        }
+        return live;
     }
 
     webSocketClose(ws) {

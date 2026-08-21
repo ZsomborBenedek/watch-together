@@ -10,7 +10,7 @@ const DEFAULT_RELAY_URL = 'wss://watch-together-relay.example.workers.dev';
 
 // Ambiguous glyphs (O/0, I/1) are omitted — codes get read aloud and typed by hand.
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const CODE_LENGTH = 6;
+const CODE_LENGTH = 9;
 
 // Also keeps Chrome's service worker alive: WebSocket activity resets the
 // idle timer, so a session never dies from the 30s eviction.
@@ -64,9 +64,9 @@ function generateCode() {
     return code;
 }
 
-// Displayed as ABC-DEF; the relay ignores the dash.
+// Displayed in groups of three (ABC-DEF-GHI); the relay ignores the dashes.
 function formatCode(code) {
-    return code.slice(0, 3) + '-' + code.slice(3);
+    return code.match(/.{1,3}/g).join('-');
 }
 
 function relayUrlFor(code) {
@@ -200,8 +200,10 @@ function newSession() {
 
 function joinSession(code) {
     const normalized = code.replace(/-/g, '').toUpperCase();
-    if (!/^[A-Z0-9]{4,32}$/.test(normalized)) {
-        chrome.storage.local.set({ connectionError: 'That room code looks wrong.' });
+    if (normalized.length !== CODE_LENGTH || !/^[A-Z0-9]+$/.test(normalized)) {
+        chrome.storage.local.set({
+            connectionError: 'Room codes are ' + CODE_LENGTH + ' characters, like ABC-DEF-GHI.'
+        });
         return;
     }
     chrome.storage.local.set({

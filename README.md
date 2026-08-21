@@ -12,14 +12,14 @@ peers and stores nothing.
 
 1. Deploy the relay once (see below) and put its `wss://` URL into the
    extension: popup → **Relay server** → paste → Save.
-2. One person presses **Create** and reads out the room code (e.g. `ABC-DEF`).
+2. One person presses **Create** and reads out the room code (e.g. `ABC-DEF-GHI`).
 3. The other presses **Join**, types the code, and presses Connect.
 4. Once both are in, visiting the same site with any video keeps playback in
    sync. Use the toggle at the bottom to sync **This Page** only, **All** tabs,
    or turn it **Off**.
 
-Room codes are case-insensitive and the dash is cosmetic, so `abc-def` and
-`ABCDEF` both work.
+Room codes are case-insensitive and the dashes are cosmetic, so `abc-def-ghi` and
+`ABCDEFGHI` both work.
 
 ## The relay
 

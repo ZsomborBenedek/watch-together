@@ -26,7 +26,7 @@ extension reaches as `ws://localhost:8787`.
 ## Protocol
 
 Clients open `wss://<host>/room/<CODE>`. Codes are case-insensitive and dashes
-are ignored, so `ABC-DEF` and `abcdef` are the same room.
+are ignored, so `ABC-DEF-GHI` and `abcdefghi` are the same room.
 
 | Direction | Message | Meaning |
 |---|---|---|

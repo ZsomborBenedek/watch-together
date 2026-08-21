@@ -6,6 +6,15 @@ if (window.contentScriptVideo !== true) {
     // Max allowed time offset between videos (in seconds)
     const toffset = 0.5;
 
+    // Applying a remote state calls play/pause/currentTime, which fire the
+    // very events that trigger sendState. Without a guard the change bounces
+    // back to the peer, who sees it as news and echoes in turn. Sends are
+    // dropped while they would only reproduce what we were just told, for
+    // long enough to cover the events the change sets off.
+    const echoWindow = 1000;
+    let appliedState = null;
+    let appliedUntil = 0;
+
     // Init
     let video = document.querySelector('video');
 
@@ -39,12 +48,24 @@ if (window.contentScriptVideo !== true) {
                 isPaused: video.paused,
                 currentTime: video.currentTime
             };
+            if (echoesAppliedState(videoState)) return;
+
             try {
                 chrome.runtime.sendMessage({ action: 'sendState', content: videoState });
             } catch (error) {
                 console.log(error);
             }
         }
+    }
+
+    // A state matching what we just applied carries no news for the peer: it
+    // is the peer's own change coming back. Anything materially different is
+    // a real local action and must still be sent, even inside the window.
+    function echoesAppliedState(videoState) {
+        return appliedState !== null &&
+            Date.now() < appliedUntil &&
+            appliedState.isPaused === videoState.isPaused &&
+            Math.abs(appliedState.currentTime - videoState.currentTime) <= toffset;
     }
 
     function videoEquals(incomingState) {
@@ -58,6 +79,9 @@ if (window.contentScriptVideo !== true) {
             if (video && key == 'videoState') {
                 let videoState = changes[key].newValue;
                 if (videoEquals(videoState)) {
+                    appliedState = videoState;
+                    appliedUntil = Date.now() + echoWindow;
+
                     if (video.paused !== videoState.isPaused)
                         videoState.isPaused ? video.pause() : video.play();
                     const timediff = Math.abs(video.currentTime - videoState.currentTime);

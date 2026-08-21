@@ -19,33 +19,43 @@
     <button id="joinSessionBtn" class="btn btn-outline-danger">Join</button>
   </div>
 
-  <div id="initiator">
-    <h6 class="offset-2">Send this to the other peer:</h6>
+  <div id="session">
+    <h6 class="offset-2">Room code &mdash; share it with your friend:</h6>
     <div class="input-group">
-      <input type="text" id="ownId" class="form-control" placeholder="Your id will be here..." readonly />
+      <input type="text" id="roomCode" class="form-control roomCode" placeholder="&hellip;" readonly />
       <div class="input-group-append">
         <button id="copyBtn" class="btn btn-md btn-outline-dark m-0 px-3">Copy</button>
       </div>
     </div>
+    <div id="status" class="infoText statusLine">Connecting&hellip;</div>
   </div>
 
-  <div id="joiner">
-    <h6 class="offset-2">Paste id from other peer:</h6>
+  <div id="join">
+    <h6 class="offset-2">Enter your friend's room code:</h6>
     <div class="input-group">
-      <input type="text" id="remoteId" class="form-control" placeholder="Remote peer's id..." />
+      <input type="text" id="joinCode" class="form-control roomCode" placeholder="ABC-DEF" autocomplete="off" />
       <div class="input-group-append">
         <button id="connectBtn" class="btn btn-md btn-danger m-0 px-3">Connect</button>
-        <button id="disconnectBtn" class="btn btn-md btn-danger m-0 px-3">Disconnect</button>
       </div>
     </div>
   </div>
 
   <div id="footer" class="text-center">
-    <button id="backBtn" class="btn btn-link infoText">Not connected (go back)</button>
+    <button id="backBtn" class="btn btn-link infoText">Leave session</button>
     <div id="syncToggle" class="sync-toggle-group">
       <button class="sync-btn" data-sync="none">Off</button>
       <button class="sync-btn" data-sync="page">This Page</button>
       <button class="sync-btn" data-sync="all">All</button>
+    </div>
+  </div>
+
+  <div id="settings">
+    <button id="settingsBtn" class="btn btn-link infoText settingsToggle">Relay server</button>
+    <div id="settingsPanel" class="input-group" hidden>
+      <input type="text" id="relayUrl" class="form-control" placeholder="wss://&hellip;.workers.dev" autocomplete="off" />
+      <div class="input-group-append">
+        <button id="saveRelayBtn" class="btn btn-md btn-outline-dark m-0 px-3">Save</button>
+      </div>
     </div>
   </div>
 

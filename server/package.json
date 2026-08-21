@@ -1,0 +1,14 @@
+{
+  "name": "watch-together-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker relaying video playback state between Watch Together peers.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,40 +1,36 @@
 'use strict';
 
-let startSection = document.getElementById('start');
-let initiatorSection = document.getElementById('initiator');
-let joinerSection = document.getElementById('joiner');
-let footer = document.getElementById('footer');
-let newSessionBtn = document.getElementById('newSessionBtn');
-let joinSessionBtn = document.getElementById('joinSessionBtn');
-let ownId = document.getElementById('ownId');
-let remoteId = document.getElementById('remoteId');
-let copyButton = document.getElementById('copyBtn');
-let connectButton = document.getElementById('connectBtn');
-let disconnectButton = document.getElementById('disconnectBtn');
-let syncToggle = document.getElementById('syncToggle');
-let syncBtns = document.querySelectorAll('.sync-btn');
+const startSection = document.getElementById('start');
+const sessionSection = document.getElementById('session');
+const joinSection = document.getElementById('join');
+const footer = document.getElementById('footer');
+const settingsPanel = document.getElementById('settingsPanel');
 
+const newSessionBtn = document.getElementById('newSessionBtn');
+const joinSessionBtn = document.getElementById('joinSessionBtn');
+const roomCode = document.getElementById('roomCode');
+const joinCode = document.getElementById('joinCode');
+const statusText = document.getElementById('status');
+const copyBtn = document.getElementById('copyBtn');
+const connectBtn = document.getElementById('connectBtn');
+const backBtn = document.getElementById('backBtn');
+const settingsBtn = document.getElementById('settingsBtn');
+const saveRelayBtn = document.getElementById('saveRelayBtn');
+const relayUrl = document.getElementById('relayUrl');
+const syncToggle = document.getElementById('syncToggle');
+const syncBtns = document.querySelectorAll('.sync-btn');
+
+let lastError = null;
+
+// 'start'   — no session
+// 'join'    — entering someone else's code
+// 'session' — in a room, waiting or connected
 function setState(state) {
-    if (state === 'start') {
-        startSection.hidden = false;
-        initiatorSection.hidden = true;
-        joinerSection.hidden = true;
-        footer.hidden = true;
-    } else {
-        startSection.hidden = true;
-        footer.hidden = false;
-        if (state === 'initiate') {
-            initiatorSection.hidden = false;
-            joinerSection.hidden = false;
-            initiatorSection.parentNode.appendChild(joinerSection);
-            initiatorSection.parentNode.appendChild(footer);
-        } else if (state === 'join') {
-            initiatorSection.hidden = false;
-            joinerSection.hidden = false;
-            joinerSection.parentNode.appendChild(initiatorSection);
-            joinerSection.parentNode.appendChild(footer);
-        }
-    }
+    startSection.hidden = state !== 'start';
+    joinSection.hidden = state !== 'join';
+    sessionSection.hidden = state !== 'session';
+    footer.hidden = state === 'start';
+    backBtn.textContent = state === 'join' ? 'Back' : 'Leave session';
 }
 
 function setSyncMode(mode) {
@@ -47,11 +43,22 @@ function setSyncMode(mode) {
 }
 
 function setConnected(isConnected) {
-    remoteId.disabled = isConnected;
-    connectButton.hidden = isConnected;
-    disconnectButton.hidden = !isConnected;
-    backBtn.hidden = isConnected;
     syncToggle.hidden = !isConnected;
+    statusText.classList.toggle('connected', !!isConnected);
+    if (lastError) {
+        statusText.textContent = lastError;
+    } else if (isConnected) {
+        statusText.textContent = 'Connected — your friend is here.';
+    } else {
+        statusText.textContent = 'Waiting for your friend to join…';
+    }
+}
+
+function setError(message) {
+    lastError = message || null;
+    chrome.storage.local.get('connected', function (result) {
+        setConnected(result.connected);
+    });
 }
 
 chrome.storage.onChanged.addListener(function (changes, namespace) {
@@ -60,12 +67,12 @@ chrome.storage.onChanged.addListener(function (changes, namespace) {
             setConnected(changes[key].newValue);
         else if (key === 'state')
             setState(changes[key].newValue);
-        else if (key === 'ownId')
-            ownId.value = changes[key].newValue;
-        else if (key === 'remoteId')
-            remoteId.value = changes[key].newValue;
+        else if (key === 'roomCode')
+            roomCode.value = changes[key].newValue || '';
         else if (key === 'sync')
             setSyncMode(changes[key].newValue);
+        else if (key === 'connectionError')
+            setError(changes[key].newValue);
     }
 });
 
@@ -74,57 +81,55 @@ window.addEventListener('load', initPopup, false);
 
 function initPopup() {
 
-    chrome.storage.local.get('state', function (result) {
-        setState(result.state);
-    });
-
-    chrome.storage.local.get('connected', function (result) {
-        setConnected(result.connected);
-    });
-
-    chrome.storage.local.get('ownId', function (result) {
-        if (result.ownId != null)
-            ownId.value = result.ownId;
-    });
-
-    chrome.storage.local.get('remoteId', function (result) {
-        if (result.remoteId != null)
-            remoteId.value = result.remoteId;
-    });
-
-    chrome.storage.local.get('sync', function (result) {
-        setSyncMode(result.sync);
-    });
+    chrome.storage.local.get(
+        ['state', 'connected', 'roomCode', 'sync', 'relayUrl', 'connectionError'],
+        function (result) {
+            setState(result.state || 'start');
+            lastError = result.connectionError || null;
+            setConnected(result.connected);
+            setSyncMode(result.sync);
+            if (result.roomCode != null) roomCode.value = result.roomCode;
+            if (result.relayUrl != null) relayUrl.value = result.relayUrl;
+        }
+    );
 
     newSessionBtn.addEventListener('click', function () {
-        setState('initiate');
-        chrome.storage.local.set({ state: 'initiate' }, function () { });
+        setState('session');
         chrome.runtime.sendMessage({ action: 'newSession' });
     }, false);
 
     joinSessionBtn.addEventListener('click', function () {
         setState('join');
-        chrome.storage.local.set({ state: 'join' }, function () { });
+        chrome.storage.local.set({ state: 'join' });
+        joinCode.focus();
     }, false);
 
-    copyButton.addEventListener('click', function () {
-        navigator.clipboard.writeText(ownId.value).then(() => {
-            copyButton.innerHTML = 'Copy again!';
+    copyBtn.addEventListener('click', function () {
+        navigator.clipboard.writeText(roomCode.value).then(() => {
+            copyBtn.innerHTML = 'Copied!';
         });
     }, false);
 
-    connectButton.addEventListener('click', function () {
-        if (remoteId.value.length > 0) {
-            chrome.runtime.sendMessage({ action: 'joinSession', remoteId: remoteId.value });
-        }
-    }, false);
+    connectBtn.addEventListener('click', submitJoin, false);
 
-    disconnectButton.addEventListener('click', function () {
-        chrome.runtime.sendMessage({ action: 'disconnectPeers' });
+    joinCode.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') submitJoin();
     }, false);
 
     backBtn.addEventListener('click', function () {
-        chrome.runtime.sendMessage({ action: 'disconnectPeers' });
+        chrome.runtime.sendMessage({ action: 'leaveSession' });
+        setState('start');
+    }, false);
+
+    settingsBtn.addEventListener('click', function () {
+        settingsPanel.hidden = !settingsPanel.hidden;
+    }, false);
+
+    saveRelayBtn.addEventListener('click', function () {
+        const url = relayUrl.value.trim();
+        chrome.storage.local.set({ relayUrl: url || null }, function () {
+            saveRelayBtn.innerHTML = 'Saved!';
+        });
     }, false);
 
     syncBtns.forEach(btn => {
@@ -132,4 +137,11 @@ function initPopup() {
             chrome.storage.local.set({ sync: btn.dataset.sync });
         });
     });
+}
+
+function submitJoin() {
+    const code = joinCode.value.trim();
+    if (code.length === 0) return;
+    setError(null);
+    chrome.runtime.sendMessage({ action: 'joinSession', roomCode: code });
 }

@@ -5,8 +5,10 @@ video element. Two people join the same room and either of them can pause, play
 or seek — the other's video follows along.
 
 Playback state travels over a WebSocket to a small Cloudflare Worker relay that
-you deploy yourself (see [server/](server/)). The relay forwards bytes between
-peers and stores nothing.
+you deploy yourself (see [server/](server/)). Peers agree a key directly with
+each other and encrypt everything they exchange, so the relay forwards sealed
+bytes it cannot read and stores nothing. It is never told the room code either,
+only a hash of it.
 
 ## How to use
 

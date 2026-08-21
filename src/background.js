@@ -1,6 +1,8 @@
 'use strict';
 
 let syncEnabled = false;
+let syncMode = 'none';
+let syncTabId = null;
 
 async function ensureOffscreen() {
     if (await chrome.offscreen.hasDocument()) return;
@@ -17,22 +19,44 @@ chrome.runtime.onInstalled.addListener(function () {
     chrome.storage.local.set({ remoteId: null });
     chrome.storage.local.set({ state: 'start' });
     chrome.storage.local.set({ connected: false });
-    chrome.storage.local.set({ sync: false });
+    chrome.storage.local.set({ sync: 'none' });
     ensureOffscreen();
 });
 
 chrome.runtime.onStartup.addListener(ensureOffscreen);
 
-function syncVids(_sync) {
-    if (_sync) {
+function syncVids(mode) {
+    syncMode = mode;
+    chrome.tabs.onActivated.removeListener(onTabActivated);
+    chrome.tabs.onUpdated.removeListener(onTabUpdated);
+    chrome.tabs.onRemoved.removeListener(onTabRemoved);
+
+    if (mode === 'all') {
+        syncEnabled = true;
         injectContentScript();
-        console.log('vids syncing');
-        chrome.tabs.onActivated.addListener(injectContentScriptToActivated);
-        chrome.tabs.onUpdated.addListener(injectContentScriptToUpdated);
+        chrome.tabs.onActivated.addListener(onTabActivated);
+        chrome.tabs.onUpdated.addListener(onTabUpdated);
+    } else if (mode === 'page') {
+        syncEnabled = true;
+        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+            if (tabs.length === 0) return;
+            const tab = tabs[0];
+            if (!tab.url || !tab.url.startsWith('http')) return;
+            syncTabId = tab.id;
+            chrome.storage.local.set({ syncTabId: tab.id });
+            chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['src/content.js']
+            }, _ => {
+                let e = chrome.runtime.lastError;
+                if (e !== undefined) console.log(_, e);
+            });
+            chrome.tabs.onUpdated.addListener(onTabUpdated);
+            chrome.tabs.onRemoved.addListener(onTabRemoved);
+        });
     } else {
-        console.log('vids not syncing');
-        chrome.tabs.onActivated.removeListener(injectContentScriptToActivated);
-        chrome.tabs.onUpdated.removeListener(injectContentScriptToUpdated);
+        syncEnabled = false;
+        syncTabId = null;
     }
 }
 
@@ -51,12 +75,28 @@ function injectContentScript() {
     });
 }
 
-function injectContentScriptToActivated(activeInfo) {
+function onTabActivated(activeInfo) {
     injectContentScript();
 }
 
-function injectContentScriptToUpdated(tabId, changeInfo, tab) {
-    if (changeInfo.status === 'complete') injectContentScript();
+function onTabUpdated(tabId, changeInfo, tab) {
+    if (changeInfo.status !== 'complete') return;
+    if (!tab.url || !tab.url.startsWith('http')) return;
+    if (syncMode === 'page' && tabId !== syncTabId) return;
+    chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['src/content.js']
+    }, _ => {
+        let e = chrome.runtime.lastError;
+        if (e !== undefined) console.log(_, e);
+    });
+}
+
+function onTabRemoved(tabId) {
+    if (tabId === syncTabId) {
+        syncTabId = null;
+        chrome.storage.local.set({ sync: 'none', syncTabId: null });
+    }
 }
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
@@ -80,6 +120,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         });
     } else if (request.action === 'sendState') {
         if (!syncEnabled) return;
+        if (syncMode === 'page' && sender.tab?.id !== syncTabId) return;
         ensureOffscreen().then(() => {
             chrome.runtime.sendMessage({ ...request, target: 'offscreen' });
         });
@@ -89,8 +130,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 chrome.storage.onChanged.addListener(function (changes, namespace) {
     for (var key in changes) {
         if (key === 'sync') {
-            syncEnabled = changes[key].newValue;
-            syncVids(changes[key].newValue);
+            let val = changes[key].newValue;
+            if (val === true) val = 'all';
+            if (val === false || val == null) val = 'none';
+            syncEnabled = val !== 'none';
+            syncVids(val);
         }
     }
 });

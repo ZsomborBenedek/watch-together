@@ -11,9 +11,8 @@ let remoteId = document.getElementById('remoteId');
 let copyButton = document.getElementById('copyBtn');
 let connectButton = document.getElementById('connectBtn');
 let disconnectButton = document.getElementById('disconnectBtn');
-let vidSync = document.getElementById('vidSync');
-let vidSyncContainer = document.getElementById('vidSyncContainer');
-let syncLabel = document.getElementById('syncLabel');
+let syncToggle = document.getElementById('syncToggle');
+let syncBtns = document.querySelectorAll('.sync-btn');
 
 function setState(state) {
     if (state === 'start') {
@@ -38,13 +37,21 @@ function setState(state) {
     }
 }
 
+function setSyncMode(mode) {
+    let val = mode;
+    if (val === true) val = 'all';
+    if (val === false || val == null) val = 'none';
+    syncBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.sync === val);
+    });
+}
+
 function setConnected(isConnected) {
     remoteId.disabled = isConnected;
     connectButton.hidden = isConnected;
     disconnectButton.hidden = !isConnected;
     backBtn.hidden = isConnected;
-    vidSyncContainer.hidden = !isConnected;
-    vidSync.checked = isConnected;
+    syncToggle.hidden = !isConnected;
 }
 
 chrome.storage.onChanged.addListener(function (changes, namespace) {
@@ -53,15 +60,12 @@ chrome.storage.onChanged.addListener(function (changes, namespace) {
             setConnected(changes[key].newValue);
         else if (key === 'state')
             setState(changes[key].newValue);
-        else if (key === 'ownId') {
+        else if (key === 'ownId')
             ownId.value = changes[key].newValue;
-        }
         else if (key === 'remoteId')
             remoteId.value = changes[key].newValue;
-        else if (key === 'sync') {
-            vidSync.checked = changes[key].newValue;
-            syncLabel.textContent = vidSync.checked ? 'Video syncing on' : 'Video syncing off';
-        }
+        else if (key === 'sync')
+            setSyncMode(changes[key].newValue);
     }
 });
 
@@ -89,8 +93,7 @@ function initPopup() {
     });
 
     chrome.storage.local.get('sync', function (result) {
-        vidSync.checked = result.sync;
-        syncLabel.textContent = vidSync.checked ? 'Video syncing on' : 'Video syncing off';
+        setSyncMode(result.sync);
     });
 
     newSessionBtn.addEventListener('click', function () {
@@ -124,7 +127,9 @@ function initPopup() {
         chrome.runtime.sendMessage({ action: 'disconnectPeers' });
     }, false);
 
-    vidSync.addEventListener('click', function () {
-        chrome.storage.local.set({ sync: vidSync.checked }, function () { });
+    syncBtns.forEach(btn => {
+        btn.addEventListener('click', function () {
+            chrome.storage.local.set({ sync: btn.dataset.sync });
+        });
     });
 }

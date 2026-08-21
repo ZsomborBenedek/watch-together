@@ -42,9 +42,10 @@
 
   <div id="footer" class="text-center">
     <button id="backBtn" class="btn btn-link infoText">Not connected (go back)</button>
-    <div id="vidSyncContainer" class="custom-control custom-switch">
-      <input type="checkbox" id="vidSync" class="custom-control-input custom-control-input-red">
-      <label id="syncLabel" class="infoText custom-control-label" for="vidSync"></label>
+    <div id="syncToggle" class="sync-toggle-group">
+      <button class="sync-btn" data-sync="none">Off</button>
+      <button class="sync-btn" data-sync="page">This Page</button>
+      <button class="sync-btn" data-sync="all">All</button>
     </div>
   </div>
 

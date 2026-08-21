@@ -24,21 +24,35 @@ body {
     margin: 0rem;
 }
 
-.custom-control-input-red:focus~.custom-control-label::before {
-    border-color: #ff4444 !important;
-    box-shadow: 0 0 0 0.2rem #ff444449 !important;
+.sync-toggle-group {
+    display: flex;
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid #dee2e6;
+    margin: 0.4rem auto;
+    width: fit-content;
 }
 
-.custom-control-input-red:checked~.custom-control-label::before {
-    border-color: #ff4444 !important;
-    background-color: #ff4444 !important;
+.sync-btn {
+    border: none;
+    background: transparent;
+    padding: 0.25rem 0.8rem;
+    font-size: 0.8rem;
+    color: #6c757d;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+    white-space: nowrap;
 }
 
-.custom-control-input-red:focus:not(:checked)~.custom-control-label::before {
-    border-color: #ff444486 !important;
+.sync-btn:not(:last-child) {
+    border-right: 1px solid #dee2e6;
 }
 
-.custom-control-input-red:not(:disabled):active~.custom-control-label::before {
-    background-color: #fdc9c9 !important;
-    border-color: #fdc9c9 !important;
+.sync-btn:hover:not(.active) {
+    background: #f8f9fa;
+}
+
+.sync-btn.active {
+    background: #dc3545;
+    color: #fff;
 }

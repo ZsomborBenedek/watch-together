@@ -148,7 +148,7 @@ export class Room {
             // Heartbeats are auto-answered without waking this object, so the
             // runtime timestamp is the only evidence a quiet socket is alive.
             const auto = this.state.getWebSocketAutoResponseTimestamp(socket);
-            const lastSeen = Math.max(state.seen || 0, auto ? auto.getTime() : 0);
+            const lastSeen = Math.max(state.seen || 0, auto || 0);
 
             const expired = now - state.opened > MAX_SESSION_MS;
             const stale = now - lastSeen > STALE_SOCKET_MS;

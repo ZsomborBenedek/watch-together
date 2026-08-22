@@ -7,12 +7,6 @@ body {
     color: gray;
 }
 
-#start,
-#initiator,
-#joiner {
-    margin: 0.7rem;
-}
-
 #footer {
     width: 100%;
     padding: 0rem;
@@ -55,4 +49,49 @@ body {
 .sync-btn.active {
     background: #dc3545;
     color: #fff;
+}
+
+#start,
+#session,
+#join,
+#settings {
+    margin: 0.7rem;
+}
+
+.roomCode {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+.statusLine {
+    display: block;
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    /* textContent keeps the newline; this is what renders it. */
+    white-space: pre-line;
+}
+
+.statusLine.connected {
+    color: #198754;
+}
+
+.settingsToggle {
+    padding: 0rem;
+    margin: 0rem;
+    font-size: 0.75rem;
+}
+
+.settingsHint {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.7rem;
+}
+
+.settingsHint.warning {
+    color: #dc3545;
+}
+
+.statusLine.error {
+    color: #dc3545;
 }

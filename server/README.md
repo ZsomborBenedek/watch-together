@@ -30,13 +30,14 @@ extension reaches as `ws://localhost:8787`.
 
 ## Protocol
 
-Clients open `wss://<host>/room/<ROOM_ID>`, where `ROOM_ID` is 16 bytes of
-`PBKDF2-SHA256(code, salt="watch-together/room", 600k iterations)` in hex.
-Peers exchange the code between themselves; only this derived id is ever
-transmitted. The stretching matters: the code has ~45 bits of entropy, so a
-plain hash of it could be enumerated offline from the room id alone, and the
-recovered code is exactly what an active relay would need to man-in-the-middle
-the handshake.
+Clients open `wss://<host>/room/<ROOM_ID>`, where `ROOM_ID` is the first half
+of `PBKDF2-SHA256(code, salt="watch-together/room", 600k iterations)` in hex;
+the second half never leaves the browser and salts the session key derivation.
+Peers exchange the code between themselves; only the derived id is ever
+transmitted. The stretching matters: the code has ~45 bits of entropy, so with
+a plain hash the relay could either enumerate the code offline from the room
+id, or substitute its own handshake keys and grind the code out of a captured
+frame afterwards. Stretched, each guess costs 600k hashes on both routes.
 
 | Direction | Message | Meaning |
 |---|---|---|
@@ -48,10 +49,11 @@ the handshake.
 ### Encryption
 
 Both peers send `hello` when the room reaches two, derive a shared secret with
-ECDH P-256, and fold the room code into HKDF alongside it. A passive relay faces
-the Diffie–Hellman problem; an active one substituting its own public keys would
-also have to produce a code it never saw. Keys are ephemeral per connection, so
-a reconnect renegotiates and a finished session cannot be reopened afterwards.
+ECDH P-256, and fold the stretched room code into HKDF alongside it. A passive
+relay faces the Diffie–Hellman problem; an active one substituting its own
+public keys would also have to produce a code it never saw, at a full PBKDF2
+stretch per guess. Keys are ephemeral per connection, so a reconnect
+renegotiates and a finished session cannot be reopened afterwards.
 
 State is sealed with AES-GCM and carries a monotonic per-connection counter,
 so a relay that records a valid ciphertext cannot replay an old pause or seek

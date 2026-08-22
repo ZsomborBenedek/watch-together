@@ -26,12 +26,12 @@ const RECONNECT_MAX_MS = 30000;
 const ROOM_ID_INFO = 'watch-together/room';
 const SESSION_KEY_INFO = 'watch-together/session/v1';
 
-// The room id is the one code-derived value the relay ever sees, and the code
-// holds only ~45 bits of entropy: a plain hash could be enumerated offline,
-// and the recovered code is exactly what an active relay would need to
-// man-in-the-middle the handshake. Stretching the derivation prices that
-// enumeration out of reach; the cost is paid once per connection.
-const ROOM_ID_ITERATIONS = 600000;
+// The code holds only ~45 bits of entropy, so everything derived from it is
+// stretched. That closes two attacks at once: the relay walking back from the
+// room id it is shown to the code, and a key-substituting MITM grinding codes
+// offline against a captured frame — each guess now costs 600k hashes rather
+// than one. The cost is paid once per connection.
+const CODE_STRETCH_ITERATIONS = 600000;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -46,6 +46,7 @@ let reconnectAttempts = 0;
 // Ephemeral per connection: a reconnect renegotiates rather than reusing.
 let keyPair = null;
 let sessionKey = null;
+let keySalt = null;
 let helloSent = false;
 let helloReceived = false;
 
@@ -153,30 +154,33 @@ async function newKeyPair() {
     );
 }
 
-// What the relay is told the room is called. The room code itself never
-// leaves the browser, so the relay cannot derive the key even though it sees
-// every byte of the handshake go past — and the stretching means it cannot
-// walk back from this id to the code either (see ROOM_ID_ITERATIONS).
-async function deriveRoomId(code) {
+// One stretch of the code yields both code-derived values: the name the relay
+// is addressed by, and the salt folded into the session key. Splitting one
+// PBKDF2 block is as strong as two separate stretches — the halves are
+// mutually unpredictable, so the room id the relay sees tells it nothing
+// about the salt — at half the derivation cost. The code itself never leaves
+// the browser.
+async function deriveRoomSecrets(code) {
     const material = await crypto.subtle.importKey(
         'raw', textEncoder.encode(code), 'PBKDF2', false, ['deriveBits']
     );
-    const bits = await crypto.subtle.deriveBits(
+    const bits = new Uint8Array(await crypto.subtle.deriveBits(
         {
             name: 'PBKDF2',
             hash: 'SHA-256',
             salt: textEncoder.encode(ROOM_ID_INFO),
-            iterations: ROOM_ID_ITERATIONS
+            iterations: CODE_STRETCH_ITERATIONS
         },
         material,
-        128
-    );
-    return toHex(new Uint8Array(bits));
+        256
+    ));
+    return { roomId: toHex(bits.slice(0, 16)), keySalt: bits.slice(16) };
 }
 
-// ECDH gives secrecy against anyone reading the handshake; folding the room
-// code into HKDF means an *active* relay cannot simply substitute its own
-// public keys, because it would also have to produce a code it never saw.
+// ECDH gives secrecy against anyone reading the handshake; folding the
+// stretched code into HKDF means an *active* relay cannot simply substitute
+// its own public keys, because it would also have to produce a code it never
+// saw — and testing each guess costs a full stretch, not one hash.
 async function deriveSessionKey(peerPublicRaw) {
     const peerKey = await crypto.subtle.importKey(
         'raw', peerPublicRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []
@@ -189,7 +193,7 @@ async function deriveSessionKey(peerPublicRaw) {
         {
             name: 'HKDF',
             hash: 'SHA-256',
-            salt: textEncoder.encode(roomCode || ''),
+            salt: keySalt,
             info: textEncoder.encode(SESSION_KEY_INFO)
         },
         material,
@@ -299,9 +303,11 @@ async function openSocket(code) {
     helloReceived = false;
     const pair = await newKeyPair();
 
-    // The relay is addressed by a hash of the code, so the code itself — the
-    // one thing that would let it derive the key — never reaches it.
-    const url = await relayUrlFor(await deriveRoomId(roomCode));
+    // The relay is addressed by a stretched hash of the code, so the code
+    // itself — the one thing that would let it derive the key — never
+    // reaches it.
+    const secrets = await deriveRoomSecrets(roomCode);
+    const url = await relayUrlFor(secrets.roomId);
 
     // Superseded while we were preparing: never open the socket at all, and
     // leave the globals — `connecting` included — to whoever superseded us.
@@ -309,6 +315,7 @@ async function openSocket(code) {
         return;
     }
     keyPair = pair;
+    keySalt = secrets.keySalt;
 
     // Distinguishes a relay that was never reachable from one that dropped a
     // working session; the two need different explanations.
@@ -457,6 +464,7 @@ function closeSocket() {
     connecting = false;
     // Dropping the keypair is what makes this session unreadable afterwards.
     sessionKey = null;
+    keySalt = null;
     helloSent = false;
     helloReceived = false;
     keyPair = null;

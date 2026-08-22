@@ -3,8 +3,13 @@
 A Cloudflare Worker that relays playback state between peers. One Durable
 Object per room code, using hibernatable WebSockets so idle rooms cost nothing.
 
-The relay forwards message bytes untouched and keeps no history — it knows how
-many sockets are in a room, and nothing about what they contain.
+The relay forwards message bytes untouched and keeps no history. Payloads are
+encrypted end to end by the peers, so it cannot read them even if it wanted to:
+it sees how many sockets are in a room, how large their frames are and when they
+arrive, and nothing else.
+
+It is not even told the room code — clients address rooms by a hash of it, so
+the one value that would let the relay derive a session key never reaches it.
 
 ## Deploy
 
@@ -25,20 +30,33 @@ extension reaches as `ws://localhost:8787`.
 
 ## Protocol
 
-Clients open `wss://<host>/room/<CODE>`. Codes are case-insensitive and dashes
-are ignored, so `ABC-DEF-GHI` and `abcdefghi` are the same room.
+Clients open `wss://<host>/room/<ROOM_ID>`, where `ROOM_ID` is the first 16
+bytes of `SHA-256("watch-together/room|<CODE>")` in hex. Peers exchange the
+code between themselves; only its hash is ever transmitted.
 
 | Direction | Message | Meaning |
 |---|---|---|
 | server → client | `{"t":"peers","n":2}` | Room population changed. `n >= 2` means a peer is present. |
-| client → server | `{"t":"state","v":{…}}` | Playback state; relayed verbatim to every other client. |
+| client → server | `{"t":"hello","k":"<base64 P-256 public key>"}` | Handshake offer, relayed to the other peers. |
+| client → server | `{"t":"state","v":"<base64 iv+ciphertext>"}` | AES-GCM sealed playback state; relayed verbatim. |
 | client → server | `ping` | Heartbeat. Auto-answered with `pong` without waking the DO. |
+
+### Encryption
+
+Both peers send `hello` when the room reaches two, derive a shared secret with
+ECDH P-256, and fold the room code into HKDF alongside it. A passive relay faces
+the Diffie–Hellman problem; an active one substituting its own public keys would
+also have to produce a code it never saw. Keys are ephemeral per connection, so
+a reconnect renegotiates and a finished session cannot be reopened afterwards.
+
+State is sealed with AES-GCM. A typical frame is 188 characters and a pathological
+one 284, both comfortably inside the 512 limit below.
 
 ### Limits
 
 Each is set just above what video sync needs, so the relay is not useful as a
 general-purpose message bus. All four constrain the envelope rather than the
-contents, so they keep working if payloads are ever encrypted end to end.
+contents, so they keep working even though payloads are encrypted end to end.
 
 | Limit | Value | Real usage |
 |---|---|---|

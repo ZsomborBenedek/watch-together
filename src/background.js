@@ -18,12 +18,33 @@ const HEARTBEAT_MS = 20000;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
+// Domain separation, so the value the relay is given and the key the peers
+// derive cannot be confused for one another.
+const ROOM_ID_INFO = 'watch-together/room';
+const SESSION_KEY_INFO = 'watch-together/session/v1';
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
 let socket = null;
 let roomCode = null;
 let leaving = false;
 let heartbeatTimer = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
+
+// Ephemeral per connection: a reconnect renegotiates rather than reusing.
+let keyPair = null;
+let sessionKey = null;
+let helloSent = false;
+
+// Opening a socket is asynchronous — key generation, room id derivation and a
+// storage read all happen before the socket exists. Anything that tears a
+// connection down bumps this, so a call still working through those steps can
+// tell its result is no longer wanted and drop it instead of leaving an
+// orphaned socket holding a slot in the room.
+let connectionGeneration = 0;
+let connecting = false;
 
 let syncEnabled = false;
 let syncMode = 'none';
@@ -45,7 +66,9 @@ chrome.runtime.onStartup.addListener(restoreSession);
 restoreSession();
 
 function restoreSession() {
+    if (socket || connecting) return;
     chrome.storage.local.get(['roomCode', 'state'], function (result) {
+        if (socket || connecting) return;
         if (result.state === 'session' && result.roomCode) {
             openSocket(result.roomCode);
         }
@@ -69,32 +92,168 @@ function formatCode(code) {
     return code.match(/.{1,3}/g).join('-');
 }
 
-function relayUrlFor(code) {
+function relayUrlFor(roomId) {
     return new Promise(resolve => {
         chrome.storage.local.get('relayUrl', function (result) {
             const base = (result.relayUrl || DEFAULT_RELAY_URL).replace(/\/+$/, '');
-            resolve(base + '/room/' + code);
+            resolve(base + '/room/' + roomId);
         });
     });
 }
 
+/* ----------------------------- end-to-end crypto ------------------------- */
+
+// Ephemeral ECDH per connection, so a session's traffic becomes undecryptable
+// the moment both peers drop their keypairs — a code leaked later cannot
+// retroactively open it.
+async function newKeyPair() {
+    return crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'P-256' },
+        false,
+        ['deriveBits']
+    );
+}
+
+// What the relay is told the room is called. The room code itself never
+// leaves the browser, so the relay cannot derive the key even though it sees
+// every byte of the handshake go past.
+async function deriveRoomId(code) {
+    const digest = await crypto.subtle.digest(
+        'SHA-256',
+        textEncoder.encode(ROOM_ID_INFO + '|' + code)
+    );
+    return toHex(new Uint8Array(digest).slice(0, 16));
+}
+
+// ECDH gives secrecy against anyone reading the handshake; folding the room
+// code into HKDF means an *active* relay cannot simply substitute its own
+// public keys, because it would also have to produce a code it never saw.
+async function deriveSessionKey(peerPublicRaw) {
+    const peerKey = await crypto.subtle.importKey(
+        'raw', peerPublicRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+    );
+    const shared = await crypto.subtle.deriveBits(
+        { name: 'ECDH', public: peerKey }, keyPair.privateKey, 256
+    );
+    const material = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+        {
+            name: 'HKDF',
+            hash: 'SHA-256',
+            salt: textEncoder.encode(roomCode || ''),
+            info: textEncoder.encode(SESSION_KEY_INFO)
+        },
+        material,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+async function encryptState(content) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const sealed = new Uint8Array(await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv }, sessionKey, textEncoder.encode(JSON.stringify(content))
+    ));
+    const packed = new Uint8Array(iv.length + sealed.length);
+    packed.set(iv);
+    packed.set(sealed, iv.length);
+    return toBase64(packed);
+}
+
+async function decryptState(payload) {
+    const packed = fromBase64(payload);
+    const plain = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: packed.slice(0, 12) }, sessionKey, packed.slice(12)
+    );
+    return JSON.parse(textDecoder.decode(plain));
+}
+
+function toHex(bytes) {
+    let hex = '';
+    for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+    return hex;
+}
+
+function toBase64(bytes) {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+}
+
+function fromBase64(text) {
+    const binary = atob(text);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+}
+
+/* ------------------------------- handshake ------------------------------- */
+
+// Both peers are told when the room reaches two, so both offer at once and
+// each answers with what it already sent. One round trip, no roles.
+async function sendHello() {
+    if (!socket || socket.readyState !== WebSocket.OPEN || !keyPair) return;
+    const raw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+    helloSent = true;
+    socket.send(JSON.stringify({ t: 'hello', k: toBase64(new Uint8Array(raw)) }));
+}
+
+async function onHello(encodedKey) {
+    if (!keyPair || typeof encodedKey !== 'string') return;
+    try {
+        sessionKey = await deriveSessionKey(fromBase64(encodedKey));
+    } catch (error) {
+        console.log('key agreement failed', error);
+        chrome.storage.local.set({ connectionError: 'Could not secure the connection.' });
+        return;
+    }
+
+    // Only now can anything actually be exchanged, so this is the honest
+    // moment to call the session connected.
+    chrome.storage.local.set({ connected: true, connectionError: null });
+    chrome.storage.local.set({ sync: 'all' });
+
+    // Covers the peer that was already waiting when we arrived and therefore
+    // missed the announcement that prompted our own offer.
+    if (!helloSent) await sendHello();
+}
+
 async function openSocket(code) {
     closeSocket();
+    const generation = connectionGeneration;
+    connecting = true;
     leaving = false;
     // Callers pass either the stored display form (ABC-DEF) or a raw code.
     roomCode = code.replace(/-/g, '').toUpperCase();
-    code = roomCode;
 
-    const url = await relayUrlFor(code);
+    // Nothing survives a reconnect: new keys, and no key until the peer has
+    // answered the handshake.
+    sessionKey = null;
+    helloSent = false;
+    keyPair = await newKeyPair();
+
+    // The relay is addressed by a hash of the code, so the code itself — the
+    // one thing that would let it derive the key — never reaches it.
+    const url = await relayUrlFor(await deriveRoomId(roomCode));
+
+    // Superseded while we were preparing: never open the socket at all.
+    if (generation !== connectionGeneration) {
+        connecting = false;
+        return;
+    }
+
     let ws;
     try {
         ws = new WebSocket(url);
     } catch (error) {
         console.log('relay url is not usable', error);
+        connecting = false;
         chrome.storage.local.set({ connectionError: String(error) });
         return;
     }
     socket = ws;
+    connecting = false;
 
     ws.addEventListener('open', function () {
         reconnectAttempts = 0;
@@ -104,7 +263,7 @@ async function openSocket(code) {
     });
 
     ws.addEventListener('message', function (event) {
-        onRelayMessage(event.data);
+        onRelayMessage(event.data).catch(error => console.log('relay message failed', error));
     });
 
     ws.addEventListener('close', function () {
@@ -121,7 +280,7 @@ async function openSocket(code) {
     });
 }
 
-function onRelayMessage(data) {
+async function onRelayMessage(data) {
     if (data === 'pong') return;
 
     let message;
@@ -133,16 +292,35 @@ function onRelayMessage(data) {
     }
 
     if (message.t === 'peers') {
-        const connected = message.n >= 2;
-        chrome.storage.local.set({ connected });
-        // Matches the old behaviour: syncing starts as soon as a peer appears.
-        if (connected) chrome.storage.local.set({ sync: 'all' });
+        if (message.n >= 2) {
+            await sendHello();
+        } else {
+            // The peer is gone and their key with them; the next one to arrive
+            // negotiates afresh.
+            sessionKey = null;
+            helloSent = false;
+            chrome.storage.local.set({ connected: false });
+        }
+        return;
+    }
+
+    if (message.t === 'hello') {
+        await onHello(message.k);
         return;
     }
 
     if (message.t === 'state' && syncEnabled) {
-        console.log(message.v);
-        chrome.storage.local.set({ videoState: message.v });
+        // Before the handshake lands there is no key, and nothing sent to us
+        // could have been readable anyway.
+        if (!sessionKey) return;
+        try {
+            const videoState = await decryptState(message.v);
+            console.log(videoState);
+            chrome.storage.local.set({ videoState });
+        } catch (error) {
+            // Wrong key, or a payload that was not written by our peer.
+            console.log('could not decrypt peer state', error);
+        }
     }
 }
 
@@ -174,6 +352,11 @@ function stopHeartbeat() {
 }
 
 function closeSocket() {
+    connectionGeneration++;
+    // Dropping the keypair is what makes this session unreadable afterwards.
+    sessionKey = null;
+    helloSent = false;
+    keyPair = null;
     stopHeartbeat();
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -231,9 +414,12 @@ function leaveSession() {
     });
 }
 
-function sendState(content) {
+async function sendState(content) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({ t: 'state', v: content }));
+    // Nothing goes out in the clear, so a half-finished handshake means the
+    // update is dropped rather than downgraded.
+    if (!sessionKey) return;
+    socket.send(JSON.stringify({ t: 'state', v: await encryptState(content) }));
 }
 
 /* ----------------------------- tab syncing ------------------------------ */
@@ -330,7 +516,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     } else if (request.action === 'sendState') {
         if (!syncEnabled) return;
         if (syncMode === 'page' && sender.tab?.id !== syncTabId) return;
-        sendState(request.content);
+        sendState(request.content).catch(error => console.log('send failed', error));
     }
 });
 

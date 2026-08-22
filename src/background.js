@@ -38,6 +38,14 @@ let keyPair = null;
 let sessionKey = null;
 let helloSent = false;
 
+// Opening a socket is asynchronous — key generation, room id derivation and a
+// storage read all happen before the socket exists. Anything that tears a
+// connection down bumps this, so a call still working through those steps can
+// tell its result is no longer wanted and drop it instead of leaving an
+// orphaned socket holding a slot in the room.
+let connectionGeneration = 0;
+let connecting = false;
+
 let syncEnabled = false;
 let syncMode = 'none';
 let syncTabId = null;
@@ -58,7 +66,9 @@ chrome.runtime.onStartup.addListener(restoreSession);
 restoreSession();
 
 function restoreSession() {
+    if (socket || connecting) return;
     chrome.storage.local.get(['roomCode', 'state'], function (result) {
+        if (socket || connecting) return;
         if (result.state === 'session' && result.roomCode) {
             openSocket(result.roomCode);
         }
@@ -211,6 +221,8 @@ async function onHello(encodedKey) {
 
 async function openSocket(code) {
     closeSocket();
+    const generation = connectionGeneration;
+    connecting = true;
     leaving = false;
     // Callers pass either the stored display form (ABC-DEF) or a raw code.
     roomCode = code.replace(/-/g, '').toUpperCase();
@@ -224,15 +236,24 @@ async function openSocket(code) {
     // The relay is addressed by a hash of the code, so the code itself — the
     // one thing that would let it derive the key — never reaches it.
     const url = await relayUrlFor(await deriveRoomId(roomCode));
+
+    // Superseded while we were preparing: never open the socket at all.
+    if (generation !== connectionGeneration) {
+        connecting = false;
+        return;
+    }
+
     let ws;
     try {
         ws = new WebSocket(url);
     } catch (error) {
         console.log('relay url is not usable', error);
+        connecting = false;
         chrome.storage.local.set({ connectionError: String(error) });
         return;
     }
     socket = ws;
+    connecting = false;
 
     ws.addEventListener('open', function () {
         reconnectAttempts = 0;
@@ -331,6 +352,7 @@ function stopHeartbeat() {
 }
 
 function closeSocket() {
+    connectionGeneration++;
     // Dropping the keypair is what makes this session unreadable afterwards.
     sessionKey = null;
     helloSent = false;

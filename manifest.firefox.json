@@ -2,7 +2,7 @@
     "name": "Watch Together",
     "version": "1.1",
     "manifest_version": 3,
-    "description": "Synchronized video controlling using WebRTC.",
+    "description": "Synchronized video playback with a friend over an end-to-end encrypted relay.",
     "browser_specific_settings": {
         "gecko": {
             "id": "{be7e9567-632c-47dc-bcb0-af29eda39f51}",

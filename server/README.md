@@ -30,9 +30,13 @@ extension reaches as `ws://localhost:8787`.
 
 ## Protocol
 
-Clients open `wss://<host>/room/<ROOM_ID>`, where `ROOM_ID` is the first 16
-bytes of `SHA-256("watch-together/room|<CODE>")` in hex. Peers exchange the
-code between themselves; only its hash is ever transmitted.
+Clients open `wss://<host>/room/<ROOM_ID>`, where `ROOM_ID` is 16 bytes of
+`PBKDF2-SHA256(code, salt="watch-together/room", 600k iterations)` in hex.
+Peers exchange the code between themselves; only this derived id is ever
+transmitted. The stretching matters: the code has ~45 bits of entropy, so a
+plain hash of it could be enumerated offline from the room id alone, and the
+recovered code is exactly what an active relay would need to man-in-the-middle
+the handshake.
 
 | Direction | Message | Meaning |
 |---|---|---|
@@ -49,8 +53,10 @@ the Diffie–Hellman problem; an active one substituting its own public keys wou
 also have to produce a code it never saw. Keys are ephemeral per connection, so
 a reconnect renegotiates and a finished session cannot be reopened afterwards.
 
-State is sealed with AES-GCM. A typical frame is 188 characters and a pathological
-one 284, both comfortably inside the 512 limit below.
+State is sealed with AES-GCM and carries a monotonic per-connection counter,
+so a relay that records a valid ciphertext cannot replay an old pause or seek
+later — stale counters are dropped. A typical frame is ~210 characters and a
+pathological one ~310, both comfortably inside the 512 limit below.
 
 ### Limits
 

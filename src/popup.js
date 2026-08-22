@@ -11,6 +11,7 @@ const joinSessionBtn = document.getElementById('joinSessionBtn');
 const roomCode = document.getElementById('roomCode');
 const joinCode = document.getElementById('joinCode');
 const statusText = document.getElementById('status');
+const joinHint = document.getElementById('joinHint');
 const copyBtn = document.getElementById('copyBtn');
 const connectBtn = document.getElementById('connectBtn');
 const backBtn = document.getElementById('backBtn');
@@ -76,6 +77,11 @@ function isRelayUrl(value) {
 
 function setError(message) {
     lastError = message || null;
+    // The status line lives in the session section, which is hidden while the
+    // user is still typing a code — mirror errors into the join section too,
+    // or a rejected code looks like nothing happened.
+    joinHint.textContent = lastError || '';
+    joinHint.classList.toggle('error', !!lastError);
     chrome.storage.local.get('connected', function (result) {
         setConnected(result.connected);
     });
@@ -105,8 +111,7 @@ function initPopup() {
         ['state', 'connected', 'roomCode', 'sync', 'relayUrl', 'connectionError'],
         function (result) {
             setState(result.state || 'start');
-            lastError = result.connectionError || null;
-            setConnected(result.connected);
+            setError(result.connectionError || null);
             setSyncMode(result.sync);
             if (result.roomCode != null) roomCode.value = result.roomCode;
             if (result.relayUrl != null) relayUrl.value = result.relayUrl;

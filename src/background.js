@@ -26,6 +26,13 @@ const RECONNECT_MAX_MS = 30000;
 const ROOM_ID_INFO = 'watch-together/room';
 const SESSION_KEY_INFO = 'watch-together/session/v1';
 
+// The room id is the one code-derived value the relay ever sees, and the code
+// holds only ~45 bits of entropy: a plain hash could be enumerated offline,
+// and the recovered code is exactly what an active relay would need to
+// man-in-the-middle the handshake. Stretching the derivation prices that
+// enumeration out of reach; the cost is paid once per connection.
+const ROOM_ID_ITERATIONS = 600000;
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -40,6 +47,13 @@ let reconnectAttempts = 0;
 let keyPair = null;
 let sessionKey = null;
 let helloSent = false;
+let helloReceived = false;
+
+// Frames carry a per-connection counter, because AES-GCM authenticates a
+// replayed recording just as happily as a fresh frame: without this, a relay
+// could re-apply an old pause or seek at a moment of its choosing.
+let sendCounter = 0;
+let recvCounter = 0;
 
 // Opening a socket is asynchronous — key generation, room id derivation and a
 // storage read all happen before the socket exists. Anything that tears a
@@ -141,13 +155,23 @@ async function newKeyPair() {
 
 // What the relay is told the room is called. The room code itself never
 // leaves the browser, so the relay cannot derive the key even though it sees
-// every byte of the handshake go past.
+// every byte of the handshake go past — and the stretching means it cannot
+// walk back from this id to the code either (see ROOM_ID_ITERATIONS).
 async function deriveRoomId(code) {
-    const digest = await crypto.subtle.digest(
-        'SHA-256',
-        textEncoder.encode(ROOM_ID_INFO + '|' + code)
+    const material = await crypto.subtle.importKey(
+        'raw', textEncoder.encode(code), 'PBKDF2', false, ['deriveBits']
     );
-    return toHex(new Uint8Array(digest).slice(0, 16));
+    const bits = await crypto.subtle.deriveBits(
+        {
+            name: 'PBKDF2',
+            hash: 'SHA-256',
+            salt: textEncoder.encode(ROOM_ID_INFO),
+            iterations: ROOM_ID_ITERATIONS
+        },
+        material,
+        128
+    );
+    return toHex(new Uint8Array(bits));
 }
 
 // ECDH gives secrecy against anyone reading the handshake; folding the room
@@ -226,7 +250,9 @@ async function sendHello(generation) {
 }
 
 async function onHello(encodedKey, generation) {
-    if (!keyPair || typeof encodedKey !== 'string') return;
+    // One hello per connection: a repeat (a relay replaying the handshake)
+    // must not re-derive the key and reset the replay counters with it.
+    if (helloReceived || !keyPair || typeof encodedKey !== 'string') return;
     let derived;
     try {
         derived = await deriveSessionKey(fromBase64(encodedKey));
@@ -242,7 +268,11 @@ async function onHello(encodedKey, generation) {
     // The connection this hello arrived on may be gone by now; a key derived
     // for it must not be attached to whatever replaced it.
     if (generation !== connectionGeneration) return;
+    if (helloReceived) return;
+    helloReceived = true;
     sessionKey = derived;
+    sendCounter = 0;
+    recvCounter = 0;
 
     // Only now can anything actually be exchanged, so this is the honest
     // moment to call the session connected.
@@ -266,6 +296,7 @@ async function openSocket(code) {
     // answered the handshake.
     sessionKey = null;
     helloSent = false;
+    helloReceived = false;
     const pair = await newKeyPair();
 
     // The relay is addressed by a hash of the code, so the code itself — the
@@ -349,6 +380,7 @@ async function onRelayMessage(data, generation) {
             // negotiates afresh.
             sessionKey = null;
             helloSent = false;
+            helloReceived = false;
             chrome.storage.local.set({ connected: false });
         }
         return;
@@ -364,10 +396,14 @@ async function onRelayMessage(data, generation) {
         // could have been readable anyway.
         if (!sessionKey) return;
         try {
-            const videoState = await decryptState(message.v);
+            const frame = await decryptState(message.v);
             if (generation !== connectionGeneration) return;
-            console.log(videoState);
-            chrome.storage.local.set({ videoState });
+            // A counter at or below what we have seen is a replayed
+            // recording, not news from the peer.
+            if (typeof frame.n !== 'number' || frame.n <= recvCounter) return;
+            recvCounter = frame.n;
+            console.log(frame.s);
+            chrome.storage.local.set({ videoState: frame.s });
         } catch (error) {
             // Wrong key, or a payload that was not written by our peer.
             console.log('could not decrypt peer state', error);
@@ -422,6 +458,7 @@ function closeSocket() {
     // Dropping the keypair is what makes this session unreadable afterwards.
     sessionKey = null;
     helloSent = false;
+    helloReceived = false;
     keyPair = null;
     stopHeartbeat();
     if (reconnectTimer) {
@@ -490,7 +527,8 @@ async function sendState(content) {
     // Nothing goes out in the clear, so a half-finished handshake means the
     // update is dropped rather than downgraded.
     if (!sessionKey) return;
-    socket.send(JSON.stringify({ t: 'state', v: await encryptState(content) }));
+    const frame = { n: ++sendCounter, s: content };
+    socket.send(JSON.stringify({ t: 'state', v: await encryptState(frame) }));
 }
 
 /* ----------------------------- tab syncing ------------------------------ */

@@ -60,7 +60,7 @@ contents, so they keep working even though payloads are encrypted end to end.
 
 | Limit | Value | Real usage |
 |---|---|---|
-| Clients per room | 4 | 2 |
+| Clients per room | 2 | 2 |
 | Message size | 512 chars | ~110 |
 | Message rate | 20 per 10s per socket | a handful per session |
 | Session lifetime | 6 hours | one film |
@@ -69,7 +69,10 @@ contents, so they keep working even though payloads are encrypted end to end.
 Over-limit messages are dropped rather than closing the socket, since scrubbing
 a video can burst `seeked` events. Dead sockets are swept when the room next
 sees activity, which returns their slot before the capacity check — an idle room
-is hibernated and has nothing to reclaim.
+is hibernated and has nothing to reclaim. Because heartbeats are auto-answered
+without waking the object, a Durable Object alarm also runs the sweep every
+five minutes while sockets remain, so a client that only pings cannot outlive
+the session cap.
 
 ## Costs
 

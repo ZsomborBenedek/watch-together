@@ -17,7 +17,10 @@
 // All four survive end-to-end encryption, because they constrain the envelope
 // rather than the contents. 512 characters leaves room for an encrypted frame
 // (~180 bytes) without revisiting this.
-const MAX_CLIENTS = 4;
+// The handshake negotiates a single pairwise key, so a room is exactly two
+// people: a third socket could never join the conversation, only break the
+// key agreement for the two who had one.
+const MAX_CLIENTS = 2;
 const MAX_MESSAGE_CHARS = 512;
 
 // Over-limit messages are dropped rather than closing the socket: scrubbing a
@@ -33,6 +36,12 @@ const MAX_SESSION_MS = 6 * 60 * 60 * 1000;
 // A live client pings every 20s, so silence this long means the socket is
 // dead and its slot should go back to the room.
 const STALE_SOCKET_MS = 5 * 60 * 1000;
+
+// Heartbeats are answered by the runtime without waking this object, so a
+// socket that only pings would never be seen by an activity-driven sweep and
+// could outlive every limit above. The alarm is the wake-up path that keeps
+// the limits honest; it only needs to be as fine-grained as they are.
+const SWEEP_ALARM_MS = 5 * 60 * 1000;
 
 export class Room {
     constructor(state, env) {
@@ -75,7 +84,24 @@ export class Room {
 
         this.announcePeers();
 
+        await this.scheduleSweep();
+
         return new Response(null, { status: 101, webSocket: client });
+    }
+
+    // Keeps an alarm pending for as long as the room has sockets, so limits
+    // are enforced even when nothing but auto-answered heartbeats arrive.
+    async scheduleSweep() {
+        if (await this.state.storage.getAlarm() === null) {
+            await this.state.storage.setAlarm(Date.now() + SWEEP_ALARM_MS);
+        }
+    }
+
+    async alarm() {
+        const live = this.sweep();
+        if (live.length > 0) {
+            await this.state.storage.setAlarm(Date.now() + SWEEP_ALARM_MS);
+        }
     }
 
     webSocketMessage(ws, message) {

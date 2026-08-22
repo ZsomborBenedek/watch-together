@@ -70,12 +70,34 @@ restoreSession();
 
 function restoreSession() {
     if (socket || connecting) return;
-    chrome.storage.local.get(['roomCode', 'state'], function (result) {
+    chrome.storage.local.get(['roomCode', 'state', 'sync', 'syncTabId'], function (result) {
         if (socket || connecting) return;
-        if (result.state === 'session' && result.roomCode) {
-            openSocket(result.roomCode);
-        }
+        if (result.state !== 'session' || !result.roomCode) return;
+        // The in-memory sync mode died with the previous worker, and writing
+        // an unchanged value back to storage fires no onChanged event, so it
+        // has to be rebuilt here or every frame is dropped until the user
+        // toggles the setting.
+        restoreSyncMode(result.sync, result.syncTabId);
+        openSocket(result.roomCode);
     });
+}
+
+// Like the storage listener, but for a worker restarting mid-session:
+// 'page' mode keeps the tab it was bound to instead of re-picking whichever
+// tab happens to be active now.
+function restoreSyncMode(stored, storedTabId) {
+    let mode = stored;
+    if (mode === true) mode = 'all';
+    if (mode === false || mode == null) mode = 'none';
+    if (mode === 'page' && typeof storedTabId === 'number') {
+        syncMode = 'page';
+        syncEnabled = true;
+        syncTabId = storedTabId;
+        chrome.tabs.onUpdated.addListener(onTabUpdated);
+        chrome.tabs.onRemoved.addListener(onTabRemoved);
+        return;
+    }
+    syncVids(mode);
 }
 
 /* ------------------------------- relay ---------------------------------- */
@@ -195,22 +217,32 @@ function fromBase64(text) {
 
 // Both peers are told when the room reaches two, so both offer at once and
 // each answers with what it already sent. One round trip, no roles.
-async function sendHello() {
+async function sendHello(generation) {
     if (!socket || socket.readyState !== WebSocket.OPEN || !keyPair) return;
     const raw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+    if (generation !== connectionGeneration) return;
     helloSent = true;
     socket.send(JSON.stringify({ t: 'hello', k: toBase64(new Uint8Array(raw)) }));
 }
 
-async function onHello(encodedKey) {
+async function onHello(encodedKey, generation) {
     if (!keyPair || typeof encodedKey !== 'string') return;
+    let derived;
     try {
-        sessionKey = await deriveSessionKey(fromBase64(encodedKey));
+        derived = await deriveSessionKey(fromBase64(encodedKey));
     } catch (error) {
+        // A teardown mid-derivation throws too; that is not a failure worth
+        // reporting against whatever session replaced this one.
+        if (generation !== connectionGeneration) return;
         console.log('key agreement failed', error);
         chrome.storage.local.set({ connectionError: 'Could not secure the connection.' });
         return;
     }
+
+    // The connection this hello arrived on may be gone by now; a key derived
+    // for it must not be attached to whatever replaced it.
+    if (generation !== connectionGeneration) return;
+    sessionKey = derived;
 
     // Only now can anything actually be exchanged, so this is the honest
     // moment to call the session connected.
@@ -219,7 +251,7 @@ async function onHello(encodedKey) {
 
     // Covers the peer that was already waiting when we arrived and therefore
     // missed the announcement that prompted our own offer.
-    if (!helloSent) await sendHello();
+    if (!helloSent) await sendHello(generation);
 }
 
 async function openSocket(code) {
@@ -234,17 +266,18 @@ async function openSocket(code) {
     // answered the handshake.
     sessionKey = null;
     helloSent = false;
-    keyPair = await newKeyPair();
+    const pair = await newKeyPair();
 
     // The relay is addressed by a hash of the code, so the code itself — the
     // one thing that would let it derive the key — never reaches it.
     const url = await relayUrlFor(await deriveRoomId(roomCode));
 
-    // Superseded while we were preparing: never open the socket at all.
+    // Superseded while we were preparing: never open the socket at all, and
+    // leave the globals — `connecting` included — to whoever superseded us.
     if (generation !== connectionGeneration) {
-        connecting = false;
         return;
     }
+    keyPair = pair;
 
     // Distinguishes a relay that was never reachable from one that dropped a
     // working session; the two need different explanations.
@@ -271,7 +304,11 @@ async function openSocket(code) {
     });
 
     ws.addEventListener('message', function (event) {
-        onRelayMessage(event.data).catch(error => console.log('relay message failed', error));
+        // A replaced socket can still drain buffered messages; they belong to
+        // the session that is over, not this one.
+        if (ws !== socket) return;
+        onRelayMessage(event.data, generation)
+            .catch(error => console.log('relay message failed', error));
     });
 
     ws.addEventListener('close', function () {
@@ -293,7 +330,7 @@ async function openSocket(code) {
     });
 }
 
-async function onRelayMessage(data) {
+async function onRelayMessage(data, generation) {
     if (data === 'pong') return;
 
     let message;
@@ -306,7 +343,7 @@ async function onRelayMessage(data) {
 
     if (message.t === 'peers') {
         if (message.n >= 2) {
-            await sendHello();
+            await sendHello(generation);
         } else {
             // The peer is gone and their key with them; the next one to arrive
             // negotiates afresh.
@@ -318,7 +355,7 @@ async function onRelayMessage(data) {
     }
 
     if (message.t === 'hello') {
-        await onHello(message.k);
+        await onHello(message.k, generation);
         return;
     }
 
@@ -328,6 +365,7 @@ async function onRelayMessage(data) {
         if (!sessionKey) return;
         try {
             const videoState = await decryptState(message.v);
+            if (generation !== connectionGeneration) return;
             console.log(videoState);
             chrome.storage.local.set({ videoState });
         } catch (error) {
@@ -380,6 +418,7 @@ function stopHeartbeat() {
 
 function closeSocket() {
     connectionGeneration++;
+    connecting = false;
     // Dropping the keypair is what makes this session unreadable afterwards.
     sessionKey = null;
     helloSent = false;
@@ -410,7 +449,12 @@ function newSession() {
 
 function joinSession(code) {
     const normalized = code.replace(/-/g, '').toUpperCase();
-    if (normalized.length !== CODE_LENGTH || !/^[A-Z0-9]+$/.test(normalized)) {
+    // Checked against the generating alphabet, not just A-Z0-9: a code with
+    // O, I, 0 or 1 in it can never match a generated one, and rejecting it
+    // here beats waiting in a room nobody else can be in.
+    const wellFormed = normalized.length === CODE_LENGTH &&
+        [...normalized].every(char => CODE_ALPHABET.includes(char));
+    if (!wellFormed) {
         chrome.storage.local.set({
             connectionError: 'Room codes are ' + CODE_LENGTH + ' characters, like ABC-DEF-GHI.'
         });

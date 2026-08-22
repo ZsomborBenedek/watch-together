@@ -15,6 +15,9 @@ const CODE_LENGTH = 9;
 // Also keeps Chrome's service worker alive: WebSocket activity resets the
 // idle timer, so a session never dies from the 30s eviction.
 const HEARTBEAT_MS = 20000;
+// Retries are silent for a moment, then the message stops being "retrying"
+// and starts pointing at the setting most likely to be wrong.
+const RELAY_HINT_AFTER = 3;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
@@ -243,6 +246,10 @@ async function openSocket(code) {
         return;
     }
 
+    // Distinguishes a relay that was never reachable from one that dropped a
+    // working session; the two need different explanations.
+    let opened = false;
+
     let ws;
     try {
         ws = new WebSocket(url);
@@ -256,6 +263,7 @@ async function openSocket(code) {
     connecting = false;
 
     ws.addEventListener('open', function () {
+        opened = true;
         reconnectAttempts = 0;
         chrome.storage.local.set({ connectionError: null });
         startHeartbeat();
@@ -271,7 +279,12 @@ async function openSocket(code) {
         stopHeartbeat();
         socket = null;
         chrome.storage.local.set({ connected: false });
-        if (!leaving) scheduleReconnect();
+        if (!leaving) {
+            // Otherwise an unreachable relay is indistinguishable from a peer
+            // who simply has not arrived yet, and the popup waits forever.
+            reportConnectionTrouble(opened);
+            scheduleReconnect();
+        }
     });
 
     ws.addEventListener('error', function () {
@@ -322,6 +335,20 @@ async function onRelayMessage(data) {
             console.log('could not decrypt peer state', error);
         }
     }
+}
+
+function reportConnectionTrouble(hadConnected) {
+    let message;
+    if (hadConnected) {
+        message = 'Connection lost — reconnecting…';
+    } else if (reconnectAttempts >= RELAY_HINT_AFTER) {
+        // Broken after the first sentence so the popup keeps its width
+        // instead of stretching to fit one long line.
+        message = 'Could not reach the relay server.\nCheck it under Relay server, or use your own.';
+    } else {
+        message = 'Cannot reach the relay server — retrying…';
+    }
+    chrome.storage.local.set({ connectionError: message });
 }
 
 function scheduleReconnect() {

@@ -68,6 +68,8 @@ body {
     display: block;
     margin-top: 0.4rem;
     font-size: 0.8rem;
+    /* textContent keeps the newline; this is what renders it. */
+    white-space: pre-line;
 }
 
 .statusLine.connected {
@@ -87,5 +89,9 @@ body {
 }
 
 .settingsHint.warning {
+    color: #dc3545;
+}
+
+.statusLine.error {
     color: #dc3545;
 }

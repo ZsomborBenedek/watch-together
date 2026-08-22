@@ -47,7 +47,8 @@ function setSyncMode(mode) {
 
 function setConnected(isConnected) {
     syncToggle.hidden = !isConnected;
-    statusText.classList.toggle('connected', !!isConnected);
+    statusText.classList.toggle('connected', !!isConnected && !lastError);
+    statusText.classList.toggle('error', !!lastError);
     if (lastError) {
         statusText.textContent = lastError;
     } else if (isConnected) {

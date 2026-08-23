@@ -2,6 +2,12 @@ name = "watch-together-relay"
 main = "src/index.js"
 compatibility_date = "2025-11-01"
 
+# The relay is reachable only at relay.watch-together.net. Turning these off
+# removes the workers.dev route and the per-version preview hostnames, which
+# would otherwise stay publicly served alongside the custom domain.
+workers_dev = false
+preview_urls = false
+
 [[durable_objects.bindings]]
 name = "ROOMS"
 class_name = "Room"

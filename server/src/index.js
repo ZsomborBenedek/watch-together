@@ -14,9 +14,9 @@
 // durable defence than gating the door, since it removes the prize rather
 // than taxing access to it.
 //
-// All four survive end-to-end encryption, because they constrain the envelope
-// rather than the contents. 512 characters leaves room for an encrypted frame
-// (~180 bytes) without revisiting this.
+// All of them survive end-to-end encryption, because they constrain the
+// envelope rather than the contents. 512 characters leaves room for an
+// encrypted frame (~180 bytes) without revisiting this.
 // The handshake negotiates a single pairwise key, so a room is exactly two
 // people: a third socket could never join the conversation, only break the
 // key agreement for the two who had one.
@@ -42,6 +42,43 @@ const STALE_SOCKET_MS = 5 * 60 * 1000;
 // could outlive every limit above. The alarm is the wake-up path that keeps
 // the limits honest; it only needs to be as fine-grained as they are.
 const SWEEP_ALARM_MS = 5 * 60 * 1000;
+
+// The extension only ever says two things here ('ping' is answered by the
+// runtime before it reaches us): a hello carrying one P-256 public key, and a
+// sealed state frame. The relay stays blind to content — these checks are
+// grammar, not inspection — but refusing to carry free-form bytes is most of
+// what makes it worthless as a general-purpose message bus.
+const HELLO_KEY_CHARS = 88;  // a 65-byte uncompressed P-256 point in base64
+const STATE_MIN_CHARS = 40;  // 12-byte iv + 16-byte tag + a little payload
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function isBase64(value, min, max) {
+    return typeof value === 'string' &&
+        value.length >= min && value.length <= max &&
+        value.length % 4 === 0 &&
+        BASE64_PATTERN.test(value);
+}
+
+function conformsToProtocol(message) {
+    let parsed;
+    try {
+        parsed = JSON.parse(message);
+    } catch (e) {
+        return false;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return false;
+    }
+    // Exactly the documented fields; extra ones would be room to smuggle in.
+    if (Object.keys(parsed).length !== 2) return false;
+    if (parsed.t === 'hello') {
+        return isBase64(parsed.k, HELLO_KEY_CHARS, HELLO_KEY_CHARS);
+    }
+    if (parsed.t === 'state') {
+        return isBase64(parsed.v, STATE_MIN_CHARS, MAX_MESSAGE_CHARS);
+    }
+    return false;
+}
 
 export class Room {
     constructor(state, env) {
@@ -108,7 +145,10 @@ export class Room {
         // Binary frames and oversized payloads are not part of the protocol.
         if (typeof message !== 'string') return;
         if (message.length > MAX_MESSAGE_CHARS) return;
+        // Junk still counts against the sender's allowance, so a client
+        // spraying malformed frames rate-limits itself.
         if (!this.withinRateLimit(ws)) return;
+        if (!conformsToProtocol(message)) return;
 
         this.sweep();
         this.sendAll(message, ws);
@@ -216,6 +256,19 @@ export default {
         // Codes are shared out loud and typed by hand, so treat case and
         // grouping dashes as cosmetic: "abc-def" and "ABCDEF" are one room.
         const code = match[1].replace(/-/g, '').toUpperCase();
+
+        // A viewer opens a handful of sockets an hour; dozens a minute from
+        // one address is someone farming rooms. Checked before the Durable
+        // Object exists, so refused traffic costs nothing. Fails open when
+        // the binding is missing: this is an abuse valve, not authentication,
+        // and a misconfigured deploy should degrade, not lock everyone out.
+        if (env.CONNECTS) {
+            const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+            const { success } = await env.CONNECTS.limit({ key: ip });
+            if (!success) {
+                return new Response('too many connections', { status: 429 });
+            }
+        }
 
         const id = env.ROOMS.idFromName(code);
         return env.ROOMS.get(id).fetch(request);

@@ -6,6 +6,15 @@ compatibility_date = "2025-11-01"
 name = "ROOMS"
 class_name = "Room"
 
+# Caps how fast one address can open sockets, before any Durable Object is
+# created or billed. Deliberately approximate — the counter is per Cloudflare
+# location and eventually consistent — because this is an abuse valve against
+# room farming, not an accounting system. Period must be 10 or 60.
+[[ratelimits]]
+name = "CONNECTS"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
 # new_sqlite_classes (not new_classes) is required for Durable Objects on the
 # Workers Free plan. Switching an already-deployed class between the two
 # storage backends is not possible, so leave this as-is.

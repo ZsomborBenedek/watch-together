@@ -24,7 +24,7 @@ const syncBtns = document.querySelectorAll('.sync-btn');
 
 let lastError = null;
 
-const DEFAULT_HINT = 'Leave empty to use the built-in relay.';
+const DEFAULT_HINT = 'Just the address, e.g. relay.watch-together.net. Empty uses the built-in relay.';
 
 // 'start'   — no session
 // 'join'    — entering someone else's code
@@ -66,10 +66,16 @@ function setRelayHint(message, isError) {
 
 // Only ws:// and wss:// can ever work here, and rejecting anything else up
 // front beats letting it surface later as an opaque connection failure.
+// Only checks that this could be a host; the background script decides the
+// scheme, since that depends on whether the host is loopback.
 function isRelayUrl(value) {
+    const bare = String(value)
+        .trim()
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+        .replace(/\/+$/, '');
+    if (!bare) return false;
     try {
-        const parsed = new URL(value);
-        return parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
+        return new URL('wss://' + bare).hostname.length > 0;
     } catch (e) {
         return false;
     }
@@ -153,7 +159,7 @@ function initPopup() {
     saveRelayBtn.addEventListener('click', function () {
         const url = relayUrl.value.trim();
         if (url.length > 0 && !isRelayUrl(url)) {
-            setRelayHint('Must start with wss:// or ws://', true);
+            setRelayHint('That does not look like a server address.', true);
             return;
         }
         // An empty field clears the override and falls back to the built-in relay.

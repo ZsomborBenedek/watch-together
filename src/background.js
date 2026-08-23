@@ -4,9 +4,9 @@
 // (see server/). This file is shared by both browsers: Chrome loads it as an
 // MV3 service worker, Firefox as a background script.
 
-// Replace this after deploying your own relay, or set it at runtime from the
-// popup (Relay server), which overrides this value.
-const DEFAULT_RELAY_URL = 'wss://watch-together-relay.example.workers.dev';
+// The public relay. Users can point at a different one from the popup
+// (Relay server), which overrides this value.
+const DEFAULT_RELAY_URL = 'wss://relay.watch-together.net';
 
 // Ambiguous glyphs (O/0, I/1) are omitted — codes get read aloud and typed by hand.
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -132,10 +132,29 @@ function formatCode(code) {
     return code.match(/.{1,3}/g).join('-');
 }
 
+// Loopback is the only place a relay can be served without TLS, so it is the
+// only place ws: is correct.
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+
+// Users give a host, not a URL — "relay.watch-together.net" or
+// "localhost:8787". Any scheme they do type is dropped, because whether the
+// connection can be plaintext is a property of the host, not a preference.
+function normalizeRelayUrl(value) {
+    const bare = String(value || '')
+        .trim()
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+        .replace(/\/+$/, '');
+    if (!bare) return null;
+
+    const host = bare.split('/')[0];
+    return (LOOPBACK_HOST.test(host) ? 'ws://' : 'wss://') + bare;
+}
+
 function relayUrlFor(roomId) {
     return new Promise(resolve => {
         chrome.storage.local.get('relayUrl', function (result) {
-            const base = (result.relayUrl || DEFAULT_RELAY_URL).replace(/\/+$/, '');
+            const base = normalizeRelayUrl(result.relayUrl) ||
+                normalizeRelayUrl(DEFAULT_RELAY_URL);
             resolve(base + '/room/' + roomId);
         });
     });

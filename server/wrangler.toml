@@ -8,6 +8,13 @@ compatibility_date = "2025-11-01"
 workers_dev = false
 preview_urls = false
 
+# Pins the custom domain in config instead of leaving it as dashboard-only
+# state, so a deploy from CI provisions the hostname itself. Idempotent —
+# wrangler reuses the existing relay.watch-together.net domain.
+[[routes]]
+pattern = "relay.watch-together.net"
+custom_domain = true
+
 [[durable_objects.bindings]]
 name = "ROOMS"
 class_name = "Room"

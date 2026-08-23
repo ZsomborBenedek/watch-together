@@ -15,46 +15,81 @@ if (window.contentScriptVideo !== true) {
     let appliedState = null;
     let appliedUntil = 0;
 
-    // Init
-    let video = document.querySelector('video');
+    // Which elements already carry our listeners. A player can be swapped out
+    // under us — an SPA navigation, an ad roll — so the element is looked up
+    // fresh on every send and every apply instead of being captured once at
+    // injection time and going stale.
+    const watched = new WeakSet();
 
-    if (video) {
-        video.addEventListener('pause', sendState);
-        video.addEventListener('play', sendState);
-        video.addEventListener('seeked', sendState);
-        sendState();
+    watchVideos();
+    sendState();
+
+    // A page can hold several videos at once: feed previews, ad players, the
+    // one being watched. The largest one that has loaded anything is the one
+    // the viewer is looking at.
+    function currentVideo() {
+        let best = null;
+        let bestArea = -1;
+        for (const candidate of document.querySelectorAll('video')) {
+            if (candidate.readyState < 1) continue;
+            const area = candidate.clientWidth * candidate.clientHeight;
+            if (area > bestArea) {
+                best = candidate;
+                bestArea = area;
+            }
+        }
+        return best;
     }
 
-    new MutationObserver(function (mutations, observer) {
+    function watchVideos() {
+        for (const video of document.querySelectorAll('video')) {
+            if (watched.has(video)) continue;
+            watched.add(video);
+            video.addEventListener('pause', onVideoEvent);
+            video.addEventListener('play', onVideoEvent);
+            video.addEventListener('seeked', onVideoEvent);
+        }
+    }
+
+    // Players are usually inserted wrapped in their container, so a video can
+    // arrive as a descendant of an added node rather than as the node itself.
+    new MutationObserver(function (mutations) {
         for (const { addedNodes } of mutations) {
-            addedNodes.forEach((node) => {
-                if (node.nodeName === 'VIDEO') {
-                    video = node;
-                    video.addEventListener('pause', sendState);
-                    video.addEventListener('play', sendState);
-                    video.addEventListener('seeked', sendState);
+            for (const node of addedNodes) {
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                if (node.nodeName === 'VIDEO' || node.querySelector('video')) {
+                    watchVideos();
                     sendState();
+                    return;
                 }
-            });
+            }
         }
     }).observe(document.body, { attributes: true, childList: true, subtree: true });
 
-    function sendState() {
-        if (video && video.readyState > 2) {
-            const videoState = {
-                hostname: window.location.hostname,
-                id: video.id,
-                srcLen: video.src.length,
-                isPaused: video.paused,
-                currentTime: video.currentTime
-            };
-            if (echoesAppliedState(videoState)) return;
+    // Background players fire their own play/pause events; only the video the
+    // viewer is actually watching speaks for this tab.
+    function onVideoEvent(event) {
+        if (event.target !== currentVideo()) return;
+        sendState();
+    }
 
-            try {
-                chrome.runtime.sendMessage({ action: 'sendState', content: videoState });
-            } catch (error) {
-                console.log(error);
-            }
+    function sendState() {
+        const video = currentVideo();
+        if (!video || video.readyState <= 2) return;
+
+        const videoState = {
+            hostname: window.location.hostname,
+            id: video.id,
+            srcLen: video.src.length,
+            isPaused: video.paused,
+            currentTime: video.currentTime
+        };
+        if (echoesAppliedState(videoState)) return;
+
+        try {
+            chrome.runtime.sendMessage({ action: 'sendState', content: videoState });
+        } catch (error) {
+            console.log(error);
         }
     }
 
@@ -68,27 +103,32 @@ if (window.contentScriptVideo !== true) {
             Math.abs(appliedState.currentTime - videoState.currentTime) <= toffset;
     }
 
-    function videoEquals(incomingState) {
-        return window.location.hostname === incomingState.hostname &&
-            video.id === incomingState.id &&
-            video.src.length === incomingState.srcLen;
-    }
-
     chrome.storage.onChanged.addListener(function (changes, namespace) {
         for (var key in changes) {
-            if (video && key == 'videoState') {
-                let videoState = changes[key].newValue;
-                if (videoEquals(videoState)) {
-                    appliedState = videoState;
-                    appliedUntil = Date.now() + echoWindow;
+            if (key !== 'videoState') continue;
 
-                    if (video.paused !== videoState.isPaused)
-                        videoState.isPaused ? video.pause() : video.play();
-                    const timediff = Math.abs(video.currentTime - videoState.currentTime);
-                    if (timediff > toffset && video.readyState > 2) {
-                        video.currentTime = videoState.currentTime;
-                    }
+            const videoState = changes[key].newValue;
+            if (!videoState || videoState.hostname !== window.location.hostname) continue;
+
+            const video = currentVideo();
+            if (!video) continue;
+
+            appliedState = videoState;
+            appliedUntil = Date.now() + echoWindow;
+
+            if (video.paused !== videoState.isPaused) {
+                if (videoState.isPaused) {
+                    video.pause();
+                } else {
+                    // Autoplay policy blocks playback in a tab the viewer has
+                    // never touched; say so rather than failing silently.
+                    const started = video.play();
+                    if (started) started.catch(error => console.log('could not start playback', error));
                 }
+            }
+            const timediff = Math.abs(video.currentTime - videoState.currentTime);
+            if (timediff > toffset && video.readyState > 2) {
+                video.currentTime = videoState.currentTime;
             }
         }
     });

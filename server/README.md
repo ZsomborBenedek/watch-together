@@ -63,7 +63,7 @@ pathological one ~310, both comfortably inside the 512 limit below.
 ### Limits
 
 Each is set just above what video sync needs, so the relay is not useful as a
-general-purpose message bus. All four constrain the envelope rather than the
+general-purpose message bus. All of them constrain the envelope rather than the
 contents, so they keep working even though payloads are encrypted end to end.
 
 | Limit | Value | Real usage |
@@ -71,8 +71,20 @@ contents, so they keep working even though payloads are encrypted end to end.
 | Clients per room | 2 | 2 |
 | Message size | 512 chars | ~110 |
 | Message rate | 20 per 10s per socket | a handful per session |
+| Connects per IP | 20 per minute | a handful per hour |
 | Session lifetime | 6 hours | one film |
 | Stale socket | closed after 5 min of silence | pings every 20s |
+
+The connect limit runs in the front worker, before a Durable Object is created
+or billed, so refused traffic costs nothing. It is per-IP and deliberately
+approximate (counted per Cloudflare location) — an abuse valve, not accounting.
+
+Messages must also parse as one of the two client frames above, with exactly
+the documented fields and base64 values of plausible length. The relay still
+cannot read the sealed contents; it checks grammar, not payloads. This keeps
+it from carrying free-form bytes for anyone treating it as a message bus, and
+it stops a malicious peer from injecting spoofed server messages such as
+`peers` announcements.
 
 Over-limit messages are dropped rather than closing the socket, since scrubbing
 a video can burst `seeked` events. Dead sockets are swept when the room next

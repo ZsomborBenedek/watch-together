@@ -1,6 +1,6 @@
 {
     "name": "Watch Together",
-    "version": "1.1",
+    "version": "1.2",
     "manifest_version": 3,
     "description": "Synchronized video playback with a friend over an end-to-end encrypted relay.",
     "permissions": [

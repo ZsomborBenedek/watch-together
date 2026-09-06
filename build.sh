@@ -9,16 +9,21 @@ set -e
 
 build_common() {
     local OUT=$1
+    local MANIFEST=$2
     rm -rf "$OUT"
-    mkdir -p "$OUT/src"
-    cp -r images static "$OUT/"
+    mkdir -p "$OUT/src" "$OUT/images"
+
+    # Every icon the manifests use is a PNG, so this glob ships all of them
+    # while leaving icon.svg and make-icons.js behind. Keep non-icon PNGs
+    # (store screenshots, promo tiles) out of images/ or they ship too.
+    cp images/*.png "$OUT/images/"
+    cp -r static "$OUT/"
     cp src/background.js src/content.js src/popup.html src/popup.js "$OUT/src/"
+    cp "$MANIFEST" "$OUT/manifest.json"
 }
 
-build_common build/chrome
-cp manifest.json build/chrome/manifest.json
+build_common build/chrome manifest.json
 echo "Chrome build ready in build/chrome/"
 
-build_common build/firefox
-cp manifest.firefox.json build/firefox/manifest.json
+build_common build/firefox manifest.firefox.json
 echo "Firefox build ready in build/firefox/"

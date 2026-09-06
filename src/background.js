@@ -324,7 +324,10 @@ async function openSocket(code) {
     leaving = false;
     // Callers pass either the stored display form (ABC-DEF) or a raw code.
     roomCode = code.replace(/-/g, '').toUpperCase();
-    chrome.storage.local.set({ relayOpen: false, peerName: null });
+    // A fresh socket has no peer key, so it is never connected — including
+    // after a worker restart, where the flag from the previous life is still
+    // in storage because the old socket's close handler never ran.
+    chrome.storage.local.set({ connected: false, relayOpen: false, peerName: null });
 
     // Nothing survives a reconnect: new keys, and no key until the peer has
     // answered the handshake.
@@ -693,10 +696,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         sendName(connectionGeneration).catch(error => console.log('name send failed', error));
     } else if (request.action === 'relayChanged') {
         // Reopen the same room against the newly configured relay.
-        if (roomCode) {
-            chrome.storage.local.set({ connected: false });
-            openSocket(roomCode);
-        }
+        if (roomCode) openSocket(roomCode);
     } else if (request.action === 'sendState') {
         if (!syncEnabled) return;
         if (syncMode === 'page' && sender.tab?.id !== syncTabId) return;

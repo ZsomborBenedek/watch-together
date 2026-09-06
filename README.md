@@ -4,22 +4,24 @@ Browser extension that synchronizes video playback on any site that has an HTML
 video element. Two people join the same room and either of them can pause, play
 or seek — the other's video follows along.
 
-Playback state travels over a WebSocket to a small Cloudflare Worker relay that
-you deploy yourself (see [server/](server/)). Peers agree a key directly with
-each other and encrypt everything they exchange, so the relay forwards sealed
-bytes it cannot read and stores nothing. It is never told the room code either,
-only a hash of it.
+Playback state travels over a WebSocket to a small Cloudflare Worker relay. A
+default one is built in; you can also deploy your own (see [server/](server/)).
+Peers agree a key directly with each other and encrypt everything they
+exchange, so the relay forwards sealed bytes it cannot read and stores nothing.
+It is never told the room code either, only a hash of it. Exactly what is
+transmitted and stored is spelled out in [PRIVACY.md](PRIVACY.md).
 
 ## How to use
 
 1. Optionally deploy your own relay (see below) and put its address into the
    extension: popup → **Settings** → **Relay server** → Save. Without one the
    built-in relay is used.
-2. One person presses **Create** and reads out the room code (e.g. `ABC-DEF-GHI`).
-3. The other presses **Join**, types the code, and presses Connect.
+2. One person presses **Create a room** and shares the room code
+   (e.g. `ABC-DEF-GHI`) — there is a Copy button next to it.
+3. The other presses **Join with a code**, types it in, and presses **Connect**.
 4. Once both are in, visiting the same site with any video keeps playback in
-   sync. Use the toggle at the bottom to sync **This page** only, **All tabs**,
-   or turn it **Off**.
+   sync. Use the **Sync playback** toggle at the bottom to sync **This page**
+   only, **All tabs**, or turn it **Off**.
 
 Under **Settings** you can also give yourself a name, which is shown to the
 person you connect with (it travels inside the encrypted channel, so the relay

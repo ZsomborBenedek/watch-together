@@ -12,13 +12,19 @@ only a hash of it.
 
 ## How to use
 
-1. Deploy the relay once (see below) and put its `wss://` URL into the
-   extension: popup → **Relay server** → paste → Save.
+1. Optionally deploy your own relay (see below) and put its address into the
+   extension: popup → **Settings** → **Relay server** → Save. Without one the
+   built-in relay is used.
 2. One person presses **Create** and reads out the room code (e.g. `ABC-DEF-GHI`).
 3. The other presses **Join**, types the code, and presses Connect.
 4. Once both are in, visiting the same site with any video keeps playback in
-   sync. Use the toggle at the bottom to sync **This Page** only, **All** tabs,
+   sync. Use the toggle at the bottom to sync **This page** only, **All tabs**,
    or turn it **Off**.
+
+Under **Settings** you can also give yourself a name, which is shown to the
+person you connect with (it travels inside the encrypted channel, so the relay
+never sees it), and pin the popup to light or dark instead of following the
+system.
 
 Room codes are case-insensitive and the dashes are cosmetic, so `abc-def-ghi` and
 `ABCDEFGHI` both work.

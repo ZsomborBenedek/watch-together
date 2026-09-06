@@ -33,6 +33,10 @@ const SESSION_KEY_INFO = 'watch-together/session/v1';
 // than one. The cost is paid once per connection.
 const CODE_STRETCH_ITERATIONS = 600000;
 
+// Display names are optional, travel only inside the encrypted channel, and
+// are capped so a frame carrying one stays well inside the relay envelope.
+const NAME_MAX_LENGTH = 24;
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -74,6 +78,8 @@ chrome.runtime.onInstalled.addListener(function () {
         roomCode: null,
         state: 'start',
         connected: false,
+        relayOpen: false,
+        peerName: null,
         sync: 'none'
     });
 });
@@ -305,6 +311,10 @@ async function onHello(encodedKey, generation) {
     // Covers the peer that was already waiting when we arrived and therefore
     // missed the announcement that prompted our own offer.
     if (!helloSent) await sendHello(generation);
+
+    // Only after our own hello is out: the peer needs it to derive the key
+    // this frame is sealed with.
+    await sendName(generation);
 }
 
 async function openSocket(code) {
@@ -314,6 +324,10 @@ async function openSocket(code) {
     leaving = false;
     // Callers pass either the stored display form (ABC-DEF) or a raw code.
     roomCode = code.replace(/-/g, '').toUpperCase();
+    // A fresh socket has no peer key, so it is never connected — including
+    // after a worker restart, where the flag from the previous life is still
+    // in storage because the old socket's close handler never ran.
+    chrome.storage.local.set({ connected: false, relayOpen: false, peerName: null });
 
     // Nothing survives a reconnect: new keys, and no key until the peer has
     // answered the handshake.
@@ -355,16 +369,21 @@ async function openSocket(code) {
     ws.addEventListener('open', function () {
         opened = true;
         reconnectAttempts = 0;
-        chrome.storage.local.set({ connectionError: null });
+        chrome.storage.local.set({ connectionError: null, relayOpen: true });
         startHeartbeat();
         console.log('joined room', code);
     });
 
+    // Handled strictly in arrival order: a hello takes a moment to turn into
+    // a key, and the frame right behind it — the peer's name — must not be
+    // looked at before that key exists.
+    let inbound = Promise.resolve();
     ws.addEventListener('message', function (event) {
         // A replaced socket can still drain buffered messages; they belong to
         // the session that is over, not this one.
         if (ws !== socket) return;
-        onRelayMessage(event.data, generation)
+        inbound = inbound
+            .then(() => onRelayMessage(event.data, generation))
             .catch(error => console.log('relay message failed', error));
     });
 
@@ -372,7 +391,7 @@ async function openSocket(code) {
         if (ws !== socket) return;
         stopHeartbeat();
         socket = null;
-        chrome.storage.local.set({ connected: false });
+        chrome.storage.local.set({ connected: false, relayOpen: false, peerName: null });
         if (!leaving) {
             // Otherwise an unreachable relay is indistinguishable from a peer
             // who simply has not arrived yet, and the popup waits forever.
@@ -407,7 +426,7 @@ async function onRelayMessage(data, generation) {
             sessionKey = null;
             helloSent = false;
             helloReceived = false;
-            chrome.storage.local.set({ connected: false });
+            chrome.storage.local.set({ connected: false, peerName: null });
         }
         return;
     }
@@ -417,7 +436,7 @@ async function onRelayMessage(data, generation) {
         return;
     }
 
-    if (message.t === 'state' && syncEnabled) {
+    if (message.t === 'state') {
         // Before the handshake lands there is no key, and nothing sent to us
         // could have been readable anyway.
         if (!sessionKey) return;
@@ -428,8 +447,13 @@ async function onRelayMessage(data, generation) {
             // recording, not news from the peer.
             if (typeof frame.n !== 'number' || frame.n <= recvCounter) return;
             recvCounter = frame.n;
-            console.log(frame.s);
-            chrome.storage.local.set({ videoState: frame.s });
+            if (typeof frame.name === 'string') {
+                // Who we are connected with, as they chose to be called.
+                chrome.storage.local.set({ peerName: cleanName(frame.name) || null });
+            } else if (syncEnabled && frame.s) {
+                console.log(frame.s);
+                chrome.storage.local.set({ videoState: frame.s });
+            }
         } catch (error) {
             // Wrong key, or a payload that was not written by our peer.
             console.log('could not decrypt peer state', error);
@@ -544,18 +568,43 @@ function leaveSession() {
         roomCode: null,
         state: 'start',
         connected: false,
+        relayOpen: false,
+        peerName: null,
         sync: 'none',
         connectionError: null
     });
 }
 
-async function sendState(content) {
+async function sendFrame(fields) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     // Nothing goes out in the clear, so a half-finished handshake means the
     // update is dropped rather than downgraded.
     if (!sessionKey) return;
-    const frame = { n: ++sendCounter, s: content };
+    const frame = Object.assign({ n: ++sendCounter }, fields);
     socket.send(JSON.stringify({ t: 'state', v: await encryptState(frame) }));
+}
+
+function sendState(content) {
+    return sendFrame({ s: content });
+}
+
+// Whitespace-only and control characters are dropped, and the result is
+// capped, so what the popup shows is never wider or stranger than a name.
+function cleanName(value) {
+    return String(value || '')
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .trim()
+        .slice(0, NAME_MAX_LENGTH);
+}
+
+// Sent whenever a key is agreed and again whenever the name changes. An
+// empty name is sent too, so clearing it clears it on the other side.
+async function sendName(generation) {
+    const name = await new Promise(resolve => {
+        chrome.storage.local.get('displayName', result => resolve(cleanName(result.displayName)));
+    });
+    if (generation !== connectionGeneration || !sessionKey) return;
+    await sendFrame({ name });
 }
 
 /* ----------------------------- tab syncing ------------------------------ */
@@ -643,12 +692,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         joinSession(request.roomCode);
     } else if (request.action === 'leaveSession') {
         leaveSession();
+    } else if (request.action === 'nameChanged') {
+        sendName(connectionGeneration).catch(error => console.log('name send failed', error));
     } else if (request.action === 'relayChanged') {
         // Reopen the same room against the newly configured relay.
-        if (roomCode) {
-            chrome.storage.local.set({ connected: false });
-            openSocket(roomCode);
-        }
+        if (roomCode) openSocket(roomCode);
     } else if (request.action === 'sendState') {
         if (!syncEnabled) return;
         if (syncMode === 'page' && sender.tab?.id !== syncTabId) return;

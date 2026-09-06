@@ -4,7 +4,9 @@ const startSection = document.getElementById('start');
 const sessionSection = document.getElementById('session');
 const joinSection = document.getElementById('join');
 const footer = document.getElementById('footer');
-const settingsPanel = document.getElementById('settingsPanel');
+
+const statusPill = document.getElementById('statusPill');
+const statusPillText = document.getElementById('statusPillText');
 
 const newSessionBtn = document.getElementById('newSessionBtn');
 const joinSessionBtn = document.getElementById('joinSessionBtn');
@@ -13,28 +15,67 @@ const joinCode = document.getElementById('joinCode');
 const statusText = document.getElementById('status');
 const joinHint = document.getElementById('joinHint');
 const copyBtn = document.getElementById('copyBtn');
+const copyText = copyBtn.querySelector('.wt-copy-text');
 const connectBtn = document.getElementById('connectBtn');
+const joinBackBtn = document.getElementById('joinBackBtn');
 const backBtn = document.getElementById('backBtn');
-const settingsBtn = document.getElementById('settingsBtn');
-const saveRelayBtn = document.getElementById('saveRelayBtn');
+
+const peers = document.getElementById('peers');
+const youInitial = document.getElementById('youInitial');
+const youPlaceholder = document.getElementById('youPlaceholder');
+const youName = document.getElementById('youName');
+const peerInitial = document.getElementById('peerInitial');
+const peerPlaceholder = document.getElementById('peerPlaceholder');
+const peerName = document.getElementById('peerName');
+
+const displayName = document.getElementById('displayName');
+const saveNameBtn = document.getElementById('saveNameBtn');
+const nameHint = document.getElementById('nameHint');
 const relayUrl = document.getElementById('relayUrl');
+const saveRelayBtn = document.getElementById('saveRelayBtn');
 const relayHint = document.getElementById('relayHint');
-const syncToggle = document.getElementById('syncToggle');
 const syncBtns = document.querySelectorAll('.sync-btn');
+const themeBtns = document.querySelectorAll('.theme-btn');
 
+// The markup is the one source for the resting hint copy, so a transient
+// "Saved." always gives way to exactly the text the panel opened with.
+const DEFAULT_RELAY_HINT = relayHint.textContent;
+const DEFAULT_NAME_HINT = nameHint.textContent;
+const NAME_MAX_LENGTH = 24;
+
+// Everything the session view shows is derived from these five, so a change
+// to any of them re-renders the lot rather than patching pieces in place.
+let currentState = 'start';
 let lastError = null;
+let isConnected = false;
+let relayOpen = false;
+let myName = '';
+let friendName = null;
 
-const DEFAULT_HINT = 'Just the address, e.g. relay.watch-together.net. Empty uses the built-in relay.';
+let copiedTimer = null;
+const hintTimers = new Map();
+
+// Shows the outcome of a copy attempt on the button, then restores it.
+function showCopyResult(label) {
+    copyText.textContent = label;
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(function () {
+        copyBtn.classList.remove('copied');
+        copyText.textContent = 'Copy';
+        copiedTimer = null;
+    }, 1800);
+}
 
 // 'start'   — no session
 // 'join'    — entering someone else's code
 // 'session' — in a room, waiting or connected
 function setState(state) {
+    currentState = state;
     startSection.hidden = state !== 'start';
     joinSection.hidden = state !== 'join';
     sessionSection.hidden = state !== 'session';
-    footer.hidden = state === 'start';
-    backBtn.textContent = state === 'join' ? 'Back' : 'Leave session';
+    footer.hidden = state !== 'session';
+    renderSession();
 }
 
 function setSyncMode(mode) {
@@ -46,22 +87,115 @@ function setSyncMode(mode) {
     });
 }
 
-function setConnected(isConnected) {
-    syncToggle.hidden = !isConnected;
-    statusText.classList.toggle('connected', !!isConnected && !lastError);
-    statusText.classList.toggle('error', !!lastError);
-    if (lastError) {
-        statusText.textContent = lastError;
-    } else if (isConnected) {
-        statusText.textContent = 'Connected — your friend is here.';
+// The stored preference wins; with none stored the page follows the system,
+// which the stylesheet handles on its own via prefers-color-scheme.
+function setTheme(theme) {
+    const val = theme === 'light' || theme === 'dark' ? theme : 'system';
+    if (val === 'system') {
+        delete document.documentElement.dataset.theme;
     } else {
+        document.documentElement.dataset.theme = val;
+    }
+    themeBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.theme === val);
+    });
+}
+
+// One of: connecting (no relay yet), waiting (relay up, friend not here),
+// connected, or error.
+function sessionPhase() {
+    if (lastError) return 'error';
+    if (isConnected) return 'connected';
+    if (relayOpen) return 'waiting';
+    return 'connecting';
+}
+
+function renderSession() {
+    const phase = sessionPhase();
+    const inRoom = currentState === 'session';
+
+    // Header pill.
+    let pillStatus = 'idle';
+    let pillLabel = 'Not in a room';
+    if (inRoom) {
+        if (phase === 'error') {
+            pillStatus = 'error';
+            pillLabel = /retry|reconnect/i.test(lastError) ? 'Reconnecting' : 'Not connected';
+        } else if (phase === 'connected') {
+            pillStatus = 'connected';
+            pillLabel = 'Connected';
+        } else if (phase === 'waiting') {
+            pillStatus = 'waiting';
+            pillLabel = 'Waiting for friend';
+        } else {
+            pillStatus = 'connecting';
+            pillLabel = 'Connecting';
+        }
+    } else if (currentState === 'join') {
+        pillLabel = 'Joining a room';
+    }
+    statusPill.dataset.status = pillStatus;
+    statusPillText.textContent = pillLabel;
+
+    // Peers row.
+    peers.dataset.phase = phase;
+    setAvatar(youInitial, youPlaceholder, youName, myName, 'You');
+    const showFriend = phase === 'connected' ? friendName : null;
+    setAvatar(peerInitial, peerPlaceholder, peerName, showFriend, 'Friend');
+
+    // Status line under the peers.
+    statusText.classList.toggle('connected', phase === 'connected');
+    statusText.classList.toggle('error', phase === 'error');
+    if (phase === 'error') {
+        statusText.textContent = lastError;
+    } else if (phase === 'connected') {
+        statusText.textContent = friendName
+            ? 'Connected with ' + friendName + ' — playback stays in sync.'
+            : 'Connected — your friend is here.';
+    } else if (phase === 'waiting') {
         statusText.textContent = 'Waiting for your friend to join…';
+    } else {
+        statusText.textContent = 'Connecting to the relay…';
     }
 }
 
-function setRelayHint(message, isError) {
-    relayHint.textContent = message || DEFAULT_HINT;
-    relayHint.classList.toggle('warning', !!isError);
+// Only a leading letter or digit makes an initial. Anything else — an emoji,
+// punctuation — would show as a question mark, since charAt() takes a single
+// UTF-16 unit and an emoji is two, so those names keep the placeholder icon.
+function avatarInitial(name) {
+    const first = name.charAt(0);
+    return /[\p{L}\p{N}]/u.test(first) ? first.toUpperCase() : '';
+}
+
+// The placeholder is an <svg>, which has no .hidden property, so both are
+// toggled through the attribute.
+function setAvatar(initialEl, placeholderEl, nameEl, name, fallback) {
+    const trimmed = (name || '').trim();
+    const initial = avatarInitial(trimmed);
+    initialEl.textContent = initial;
+    initialEl.toggleAttribute('hidden', !initial);
+    placeholderEl.toggleAttribute('hidden', !!initial);
+    nameEl.textContent = trimmed || fallback;
+    nameEl.title = trimmed;
+}
+
+// Confirmations are transient: the hint goes back to its usual text after a
+// moment, so the panel never reads "Saved." an hour later.
+function setHint(element, message, tone, fallback) {
+    element.textContent = message;
+    element.classList.toggle('warning', tone === 'warning');
+    element.classList.toggle('success', tone === 'success');
+    if (hintTimers.has(element)) {
+        clearTimeout(hintTimers.get(element));
+        hintTimers.delete(element);
+    }
+    if (tone === 'success' && fallback) {
+        hintTimers.set(element, setTimeout(function () {
+            element.textContent = fallback;
+            element.classList.remove('success');
+            hintTimers.delete(element);
+        }, 3000));
+    }
 }
 
 // Only ws:// and wss:// can ever work here, and rejecting anything else up
@@ -88,23 +222,50 @@ function setError(message) {
     // or a rejected code looks like nothing happened.
     joinHint.textContent = lastError || '';
     joinHint.classList.toggle('error', !!lastError);
-    chrome.storage.local.get('connected', function (result) {
-        setConnected(result.connected);
-    });
+    renderSession();
+}
+
+// Codes are typed by hand, often read aloud: keep them upper-case and drop
+// the dashes in as the user types, so what they see matches what was shared.
+function formatCodeInput() {
+    const raw = joinCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 9);
+    const groups = raw.match(/.{1,3}/g) || [];
+    const formatted = groups.join('-');
+    if (formatted !== joinCode.value) joinCode.value = formatted;
+}
+
+function leave() {
+    chrome.runtime.sendMessage({ action: 'leaveSession' });
+    setState('start');
 }
 
 chrome.storage.onChanged.addListener(function (changes, namespace) {
     for (var key in changes) {
-        if (key === 'connected')
-            setConnected(changes[key].newValue);
-        else if (key === 'state')
-            setState(changes[key].newValue);
-        else if (key === 'roomCode')
-            roomCode.value = changes[key].newValue || '';
-        else if (key === 'sync')
-            setSyncMode(changes[key].newValue);
-        else if (key === 'connectionError')
-            setError(changes[key].newValue);
+        const value = changes[key].newValue;
+        if (key === 'connected') {
+            isConnected = !!value;
+            renderSession();
+        } else if (key === 'relayOpen') {
+            relayOpen = !!value;
+            renderSession();
+        } else if (key === 'peerName') {
+            friendName = value || null;
+            renderSession();
+        } else if (key === 'displayName') {
+            myName = value || '';
+            if (document.activeElement !== displayName) displayName.value = myName;
+            renderSession();
+        } else if (key === 'state') {
+            setState(value);
+        } else if (key === 'roomCode') {
+            roomCode.textContent = value || '…';
+        } else if (key === 'sync') {
+            setSyncMode(value);
+        } else if (key === 'theme') {
+            setTheme(value);
+        } else if (key === 'connectionError') {
+            setError(value);
+        }
     }
 });
 
@@ -114,17 +275,26 @@ window.addEventListener('load', initPopup, false);
 function initPopup() {
 
     chrome.storage.local.get(
-        ['state', 'connected', 'roomCode', 'sync', 'relayUrl', 'connectionError'],
+        ['state', 'connected', 'relayOpen', 'roomCode', 'sync', 'relayUrl',
+            'connectionError', 'displayName', 'peerName', 'theme'],
         function (result) {
-            setState(result.state || 'start');
-            setError(result.connectionError || null);
+            isConnected = !!result.connected;
+            relayOpen = !!result.relayOpen;
+            myName = result.displayName || '';
+            friendName = result.peerName || null;
+            lastError = result.connectionError || null;
+            setTheme(result.theme);
             setSyncMode(result.sync);
-            if (result.roomCode != null) roomCode.value = result.roomCode;
+            if (result.roomCode != null) roomCode.textContent = result.roomCode;
             if (result.relayUrl != null) relayUrl.value = result.relayUrl;
+            displayName.value = myName;
+            setState(result.state || 'start');
+            setError(lastError);
         }
     );
 
     newSessionBtn.addEventListener('click', function () {
+        relayOpen = false;
         setState('session');
         chrome.runtime.sendMessage({ action: 'newSession' });
     }, false);
@@ -136,39 +306,38 @@ function initPopup() {
     }, false);
 
     copyBtn.addEventListener('click', function () {
-        navigator.clipboard.writeText(roomCode.value).then(() => {
-            copyBtn.innerHTML = 'Copied!';
+        const code = roomCode.textContent.trim();
+        if (!code || code === '…') return;
+        navigator.clipboard.writeText(code).then(() => {
+            copyBtn.classList.add('copied');
+            showCopyResult('Copied');
+        }).catch(error => {
+            // Clipboard access can be refused (permissions, insecure
+            // context); the code is still on screen to copy by hand.
+            console.log('clipboard write failed', error);
+            copyBtn.classList.remove('copied');
+            showCopyResult('Copy failed');
         });
     }, false);
 
     connectBtn.addEventListener('click', submitJoin, false);
 
+    joinCode.addEventListener('input', formatCodeInput, false);
     joinCode.addEventListener('keydown', function (event) {
         if (event.key === 'Enter') submitJoin();
     }, false);
 
-    backBtn.addEventListener('click', function () {
-        chrome.runtime.sendMessage({ action: 'leaveSession' });
-        setState('start');
+    joinBackBtn.addEventListener('click', leave, false);
+    backBtn.addEventListener('click', leave, false);
+
+    saveNameBtn.addEventListener('click', saveName, false);
+    displayName.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') saveName();
     }, false);
 
-    settingsBtn.addEventListener('click', function () {
-        settingsPanel.hidden = !settingsPanel.hidden;
-    }, false);
-
-    saveRelayBtn.addEventListener('click', function () {
-        const url = relayUrl.value.trim();
-        if (url.length > 0 && !isRelayUrl(url)) {
-            setRelayHint('That does not look like a server address.', true);
-            return;
-        }
-        // An empty field clears the override and falls back to the built-in relay.
-        chrome.storage.local.set({ relayUrl: url || null }, function () {
-            setRelayHint(url ? 'Saved.' : 'Saved — using the built-in relay.');
-            // The socket URL is built when connecting, so an open session has to
-            // be reopened before a new relay actually takes effect.
-            chrome.runtime.sendMessage({ action: 'relayChanged' });
-        });
+    saveRelayBtn.addEventListener('click', saveRelay, false);
+    relayUrl.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') saveRelay();
     }, false);
 
     syncBtns.forEach(btn => {
@@ -176,11 +345,44 @@ function initPopup() {
             chrome.storage.local.set({ sync: btn.dataset.sync });
         });
     });
+
+    themeBtns.forEach(btn => {
+        btn.addEventListener('click', function () {
+            setTheme(btn.dataset.theme);
+            chrome.storage.local.set({ theme: btn.dataset.theme });
+        });
+    });
+}
+
+function saveName() {
+    const name = displayName.value.trim().slice(0, NAME_MAX_LENGTH);
+    displayName.value = name;
+    chrome.storage.local.set({ displayName: name }, function () {
+        setHint(nameHint, name ? 'Saved.' : 'Cleared — you will show up as "You".', 'success', DEFAULT_NAME_HINT);
+        // Tells the peer straight away if we are already connected to one.
+        chrome.runtime.sendMessage({ action: 'nameChanged' });
+    });
+}
+
+function saveRelay() {
+    const url = relayUrl.value.trim();
+    if (url.length > 0 && !isRelayUrl(url)) {
+        setHint(relayHint, 'That does not look like a server address.', 'warning', DEFAULT_RELAY_HINT);
+        return;
+    }
+    // An empty field clears the override and falls back to the built-in relay.
+    chrome.storage.local.set({ relayUrl: url || null }, function () {
+        setHint(relayHint, url ? 'Saved.' : 'Saved — using the built-in relay.', 'success', DEFAULT_RELAY_HINT);
+        // The socket URL is built when connecting, so an open session has to
+        // be reopened before a new relay actually takes effect.
+        chrome.runtime.sendMessage({ action: 'relayChanged' });
+    });
 }
 
 function submitJoin() {
     const code = joinCode.value.trim();
     if (code.length === 0) return;
     setError(null);
+    relayOpen = false;
     chrome.runtime.sendMessage({ action: 'joinSession', roomCode: code });
 }

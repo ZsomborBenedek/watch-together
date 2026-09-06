@@ -1,0 +1,14 @@
+{
+  "name": "watch-together-store-images",
+  "private": true,
+  "description": "Generates the Chrome Web Store screenshots and promo tiles.",
+  "scripts": {
+    "capture": "HEADFUL=1 node capture.js",
+    "compose": "node compose.js",
+    "build": "npm run capture && npm run compose"
+  },
+  "devDependencies": {
+    "puppeteer": "^25.10.0",
+    "sharp": "^0.34.0"
+  }
+}

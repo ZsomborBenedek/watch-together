@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Watch Together Demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; background: #14161a; color: #e8eaed;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 24px; padding: 32px;
+  }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+  video { width: min(760px, 100%); border-radius: 10px; background: #000;
+          box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  .readout {
+    display: flex; align-items: center; gap: 20px;
+    padding: 14px 26px; border-radius: 10px;
+    background: #1e2127; border: 1px solid #2c3038;
+  }
+  .time {
+    font: 600 44px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  }
+  .state {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .08em; padding: 7px 14px; border-radius: 999px;
+  }
+  .state.playing { background: #16351f; color: #6ee7a0; }
+  .state.paused  { background: #3a2a16; color: #f0b866; }
+  .note { font-size: 13px; color: #8b919c; margin: 0; text-align: center; }
+  .loading { font-size: 13px; color: #8b919c; margin: 0; }
+  .loading[hidden] { display: none; }
+</style>
+</head>
+<body>
+  <!-- <h1>Watch Together Demo</h1> -->
+  <video id="v" controls preload="auto"></video>
+  <p class="loading" id="loading">Loading video&hellip;</p>
+  <div class="readout">
+    <span class="time" id="t">0:00.00</span>
+    <span class="state paused" id="s">Paused</span>
+  </div>
+  <p class="note">Big Buck Bunny &copy; Blender Foundation &mdash; CC BY 3.0</p>
+<script>
+  const v = document.getElementById('v');
+  const t = document.getElementById('t');
+  const s = document.getElementById('s');
+  const loading = document.getElementById('loading');
+
+  // python3 -m http.server ignores Range headers, and without Accept-Ranges
+  // Chrome treats the response as a stream and refuses to seek at all. Pulling
+  // the file down and handing the video a blob: URL sidesteps that -- a blob is
+  // fully seekable no matter what the server supports.
+  fetch('demo.mp4')
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    })
+    .then(blob => {
+      v.src = URL.createObjectURL(blob);
+      loading.hidden = true;
+    })
+    .catch(err => {
+      loading.textContent = 'Could not load demo.mp4 — ' + err.message +
+        '. Serve this page with: python3 -m http.server 8080 --directory demo';
+    });
+
+  function fmt(sec) {
+    const m = Math.floor(sec / 60);
+    const rest = (sec % 60).toFixed(2).padStart(5, '0');
+    return m + ':' + rest;
+  }
+
+  function tick() {
+    t.textContent = fmt(v.currentTime);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  function state() {
+    const playing = !v.paused && !v.ended;
+    s.textContent = playing ? 'Playing' : 'Paused';
+    s.className = 'state ' + (playing ? 'playing' : 'paused');
+  }
+  v.addEventListener('play', state);
+  v.addEventListener('pause', state);
+  v.addEventListener('ended', state);
+  state();
+</script>
+</body>
+</html>

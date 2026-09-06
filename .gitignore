@@ -7,3 +7,5 @@ dist/
 *.zip
 .DS_Store
 build/
+# demo video, fetched locally for store screenshots
+demo/*.mp4

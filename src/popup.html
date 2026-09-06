@@ -1,66 +1,192 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-  <title>WatchTogether</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Watch Together</title>
   <link rel="stylesheet" href="../static/bootstrap.min.css">
   <link rel="stylesheet" href="../static/mdb.lite.min.css">
   <link rel="stylesheet" href="../static/popup.css">
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width">
 </head>
 
 <body>
+  <!-- Icons are referenced by id from the sprite below, so each glyph is
+       defined once and can be recoloured with currentColor. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="logoGradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ff5f6d" />
+        <stop offset="1" stop-color="#d9243a" />
+      </linearGradient>
+      <symbol id="i-logo" viewBox="0 0 128 128">
+        <path d="M64 0C113.9 0 128 14.1 128 64C128 113.9 113.9 128 64 128C14.1 128 0 113.9 0 64C0 14.1 14.1 0 64 0Z" fill="url(#logoGradient)" />
+        <path d="M32 30 L74 53 L32 76 Z" fill="#fff" fill-opacity=".4" stroke="#fff" stroke-opacity=".4" stroke-width="14" stroke-linejoin="round" />
+        <path d="M52 50 L94 73 L52 96 Z" fill="#fff" stroke="#fff" stroke-width="14" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 5v14M5 12h14" />
+      </symbol>
+      <symbol id="i-login" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+      </symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+      </symbol>
+      <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5M12 19l-7-7 7-7" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="12" height="12" rx="3" />
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12.5l4.5 4.5L19 7.5" />
+      </symbol>
+      <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21a8 8 0 0 1 16 0" />
+      </symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 9l6 6 6-6" />
+      </symbol>
+    </defs>
+  </svg>
 
-  <div id="start" class="text-center">
-    <h6>Create a session or join one:</h6>
-    <button id="newSessionBtn" class="btn btn-danger">Create</button>
-    <span class="infoText">or</span>
-    <button id="joinSessionBtn" class="btn btn-outline-danger">Join</button>
-  </div>
+  <div class="wt">
 
-  <div id="session">
-    <h6 class="offset-2">Room code &mdash; share it with your friend:</h6>
-    <div class="input-group">
-      <input type="text" id="roomCode" class="form-control roomCode" placeholder="&hellip;" readonly />
-      <div class="input-group-append">
-        <button id="copyBtn" class="btn btn-md btn-outline-dark m-0 px-3">Copy</button>
+    <header class="wt-header">
+      <div class="wt-brand">
+        <svg class="wt-logo" aria-hidden="true"><use href="#i-logo" /></svg>
+        <span class="wt-brand-name">Watch Together</span>
       </div>
-    </div>
-    <div id="status" class="infoText statusLine" role="status">Connecting&hellip;</div>
-  </div>
+      <span id="statusPill" class="wt-pill" data-status="idle" role="status" aria-live="polite">
+        <i class="wt-pill-dot" aria-hidden="true"></i>
+        <span id="statusPillText">Not in a room</span>
+      </span>
+    </header>
 
-  <div id="join">
-    <h6 class="offset-2">Enter your friend's room code:</h6>
-    <div class="input-group">
-      <input type="text" id="joinCode" class="form-control roomCode" placeholder="ABC-DEF-GHI" autocomplete="off" />
-      <div class="input-group-append">
-        <button id="connectBtn" class="btn btn-md btn-danger m-0 px-3">Connect</button>
-      </div>
-    </div>
-    <div id="joinHint" class="infoText statusLine" role="status"></div>
-  </div>
+    <main class="wt-main">
 
-  <div id="footer" class="text-center">
-    <button id="backBtn" class="btn btn-link infoText">Leave session</button>
-    <div id="syncToggle" class="sync-toggle-group">
-      <button class="sync-btn" data-sync="none">Off</button>
-      <button class="sync-btn" data-sync="page">This Page</button>
-      <button class="sync-btn" data-sync="all">All</button>
-    </div>
-  </div>
+      <section id="start" class="wt-view">
+        <p class="wt-lead">Keep a video in sync with a friend, wherever it plays.</p>
+        <div class="wt-stack">
+          <button id="newSessionBtn" class="btn wt-btn wt-btn-primary wt-btn-block" type="button">
+            <svg class="wt-icon" aria-hidden="true"><use href="#i-plus" /></svg>
+            Create a room
+          </button>
+          <button id="joinSessionBtn" class="btn wt-btn wt-btn-secondary wt-btn-block" type="button">
+            <svg class="wt-icon" aria-hidden="true"><use href="#i-login" /></svg>
+            Join with a code
+          </button>
+        </div>
+      </section>
 
-  <div id="settings">
-    <button id="settingsBtn" class="btn btn-link infoText settingsToggle">Relay server</button>
-    <div id="settingsPanel" hidden>
-      <div class="input-group">
-        <input type="text" id="relayUrl" class="form-control" placeholder="relay.watch-together.net" autocomplete="off" />
-        <div class="input-group-append">
-          <button id="saveRelayBtn" class="btn btn-md btn-outline-dark m-0 px-3">Save</button>
+      <section id="join" class="wt-view" hidden>
+        <label class="wt-label" for="joinCode">Your friend's room code</label>
+        <div class="wt-field">
+          <input type="text" id="joinCode" class="form-control wt-input wt-input-code" placeholder="ABC-DEF-GHI"
+            autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="11" />
+          <button id="connectBtn" class="btn wt-btn wt-btn-primary" type="button">Connect</button>
+        </div>
+        <div id="joinHint" class="wt-hint" role="status" aria-live="polite"></div>
+        <button id="joinBackBtn" class="btn wt-btn wt-btn-ghost wt-btn-block" type="button">
+          <svg class="wt-icon" aria-hidden="true"><use href="#i-back" /></svg>
+          Back
+        </button>
+      </section>
+
+      <section id="session" class="wt-view" hidden>
+        <div class="wt-card">
+          <div class="wt-card-head">
+            <span class="wt-label">Room code</span>
+            <span class="wt-hint">Share it with your friend</span>
+          </div>
+          <div class="wt-code-row">
+            <div id="roomCode" class="wt-code" aria-label="Room code">&hellip;</div>
+            <button id="copyBtn" class="btn wt-btn wt-btn-secondary wt-btn-copy" type="button" title="Copy room code">
+              <svg class="wt-icon wt-copy-icon" aria-hidden="true"><use href="#i-copy" /></svg>
+              <svg class="wt-icon wt-copied-icon" aria-hidden="true"><use href="#i-check" /></svg>
+              <span class="wt-copy-text">Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="peers" class="wt-peers" data-phase="connecting">
+          <div class="wt-peer">
+            <div class="wt-avatar wt-avatar-you">
+              <span id="youInitial" hidden></span>
+              <svg id="youPlaceholder" class="wt-icon" aria-hidden="true"><use href="#i-user" /></svg>
+            </div>
+            <span id="youName" class="wt-peer-name">You</span>
+          </div>
+          <div class="wt-link" aria-hidden="true">
+            <span class="wt-link-line"></span>
+            <span class="wt-link-dots"><i></i><i></i><i></i></span>
+            <span class="wt-link-check"><svg class="wt-icon"><use href="#i-check" /></svg></span>
+          </div>
+          <div class="wt-peer">
+            <div class="wt-avatar wt-avatar-peer">
+              <span id="peerInitial" hidden></span>
+              <svg id="peerPlaceholder" class="wt-icon" aria-hidden="true"><use href="#i-user" /></svg>
+            </div>
+            <span id="peerName" class="wt-peer-name">Friend</span>
+          </div>
+        </div>
+        <div id="status" class="wt-status" role="status" aria-live="polite">Connecting&hellip;</div>
+      </section>
+
+    </main>
+
+    <div id="footer" class="wt-footer" hidden>
+      <div id="syncToggle" class="wt-sync">
+        <span class="wt-sync-label">Sync playback</span>
+        <div class="wt-segment" role="group" aria-label="Sync mode">
+          <button class="sync-btn" data-sync="none" type="button">Off</button>
+          <button class="sync-btn" data-sync="page" type="button">This page</button>
+          <button class="sync-btn" data-sync="all" type="button">All tabs</button>
         </div>
       </div>
-      <div id="relayHint" class="infoText settingsHint">Leave empty to use the built-in relay.</div>
+      <button id="backBtn" class="btn wt-btn wt-btn-danger-soft wt-btn-block" type="button">
+        <svg class="wt-icon" aria-hidden="true"><use href="#i-logout" /></svg>
+        Leave session
+      </button>
     </div>
+
+    <details id="settings" class="wt-settings">
+      <summary class="wt-settings-toggle">
+        <span>Settings</span>
+        <svg class="wt-icon wt-chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
+      </summary>
+      <div class="wt-settings-body">
+
+        <label class="wt-label" for="displayName">Your name</label>
+        <div class="wt-field">
+          <input type="text" id="displayName" class="form-control wt-input" placeholder="Shown to your friend"
+            autocomplete="off" maxlength="24" />
+          <button id="saveNameBtn" class="btn wt-btn wt-btn-secondary" type="button">Save</button>
+        </div>
+        <div id="nameHint" class="wt-hint" role="status">Optional. Sent only to the person you connect with.</div>
+
+        <label class="wt-label" for="relayUrl">Relay server</label>
+        <div class="wt-field">
+          <input type="text" id="relayUrl" class="form-control wt-input" placeholder="relay.watch-together.net"
+            autocomplete="off" spellcheck="false" />
+          <button id="saveRelayBtn" class="btn wt-btn wt-btn-secondary" type="button">Save</button>
+        </div>
+        <div id="relayHint" class="wt-hint" role="status">Leave empty to use the built-in relay.</div>
+
+        <span class="wt-label">Appearance</span>
+        <div id="themeToggle" class="wt-segment wt-segment-wide" role="group" aria-label="Appearance">
+          <button class="theme-btn" data-theme="system" type="button">System</button>
+          <button class="theme-btn" data-theme="light" type="button">Light</button>
+          <button class="theme-btn" data-theme="dark" type="button">Dark</button>
+        </div>
+
+      </div>
+    </details>
+
   </div>
 
   <script src="popup.js"></script>

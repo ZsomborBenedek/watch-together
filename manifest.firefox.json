@@ -3,6 +3,7 @@
     "version": "1.2",
     "manifest_version": 3,
     "description": "Synchronized video playback with a friend over an end-to-end encrypted relay.",
+    "homepage_url": "https://github.com/ZsomborBenedek/watch-together",
     "browser_specific_settings": {
         "gecko": {
             "id": "{be7e9567-632c-47dc-bcb0-af29eda39f51}",

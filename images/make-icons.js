@@ -1,8 +1,9 @@
 'use strict';
 
-// Rasterises icon.svg into the PNG sizes the manifests reference. Uses the
-// sharp that server/ already depends on, so there is nothing extra to
-// install:
+// Rasterises icon.svg into the PNG sizes the manifests reference. Needs
+// sharp, picked up from wherever it is installed: a normal `npm install
+// sharp` anywhere up the tree, or the copy that server/'s dependencies
+// happen to pull in.
 //
 //   node images/make-icons.js
 //
@@ -12,7 +13,26 @@
 
 const path = require('path');
 const fs = require('fs');
-const sharp = require(path.join(__dirname, '..', 'server', 'node_modules', 'sharp'));
+function loadSharp() {
+    const candidates = [
+        'sharp',
+        path.join(__dirname, '..', 'server', 'node_modules', 'sharp')
+    ];
+    for (const candidate of candidates) {
+        try {
+            return require(candidate);
+        } catch (error) {
+            if (error.code !== 'MODULE_NOT_FOUND') throw error;
+        }
+    }
+    console.error(
+        'sharp is not installed. Run `npm install sharp` in the repository root ' +
+        '(or `npm install` in server/, whose dependencies include it) and retry.'
+    );
+    process.exit(1);
+}
+
+const sharp = loadSharp();
 
 const SIZES = [16, 32, 48, 64, 128];
 const THEME_SIZES = [16, 32, 64];

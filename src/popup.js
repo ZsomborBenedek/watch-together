@@ -37,8 +37,10 @@ const relayHint = document.getElementById('relayHint');
 const syncBtns = document.querySelectorAll('.sync-btn');
 const themeBtns = document.querySelectorAll('.theme-btn');
 
-const DEFAULT_RELAY_HINT = 'Just the address, e.g. relay.watch-together.net. Empty uses the built-in relay.';
-const DEFAULT_NAME_HINT = 'Optional. Sent only to the person you connect with.';
+// The markup is the one source for the resting hint copy, so a transient
+// "Saved." always gives way to exactly the text the panel opened with.
+const DEFAULT_RELAY_HINT = relayHint.textContent;
+const DEFAULT_NAME_HINT = nameHint.textContent;
 const NAME_MAX_LENGTH = 24;
 
 // Everything the session view shows is derived from these five, so a change
@@ -52,6 +54,17 @@ let friendName = null;
 
 let copiedTimer = null;
 const hintTimers = new Map();
+
+// Shows the outcome of a copy attempt on the button, then restores it.
+function showCopyResult(label) {
+    copyText.textContent = label;
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(function () {
+        copyBtn.classList.remove('copied');
+        copyText.textContent = 'Copy';
+        copiedTimer = null;
+    }, 1800);
+}
 
 // 'start'   — no session
 // 'join'    — entering someone else's code
@@ -163,7 +176,10 @@ function setHint(element, message, tone, fallback) {
     element.textContent = message;
     element.classList.toggle('warning', tone === 'warning');
     element.classList.toggle('success', tone === 'success');
-    if (hintTimers.has(element)) clearTimeout(hintTimers.get(element));
+    if (hintTimers.has(element)) {
+        clearTimeout(hintTimers.get(element));
+        hintTimers.delete(element);
+    }
     if (tone === 'success' && fallback) {
         hintTimers.set(element, setTimeout(function () {
             element.textContent = fallback;
@@ -285,13 +301,13 @@ function initPopup() {
         if (!code || code === '…') return;
         navigator.clipboard.writeText(code).then(() => {
             copyBtn.classList.add('copied');
-            copyText.textContent = 'Copied';
-            if (copiedTimer) clearTimeout(copiedTimer);
-            copiedTimer = setTimeout(function () {
-                copyBtn.classList.remove('copied');
-                copyText.textContent = 'Copy';
-                copiedTimer = null;
-            }, 1800);
+            showCopyResult('Copied');
+        }).catch(error => {
+            // Clipboard access can be refused (permissions, insecure
+            // context); the code is still on screen to copy by hand.
+            console.log('clipboard write failed', error);
+            copyBtn.classList.remove('copied');
+            showCopyResult('Copy failed');
         });
     }, false);
 

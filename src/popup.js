@@ -159,13 +159,22 @@ function renderSession() {
     }
 }
 
+// Only a leading letter or digit makes an initial. Anything else — an emoji,
+// punctuation — would show as a question mark, since charAt() takes a single
+// UTF-16 unit and an emoji is two, so those names keep the placeholder icon.
+function avatarInitial(name) {
+    const first = name.charAt(0);
+    return /[\p{L}\p{N}]/u.test(first) ? first.toUpperCase() : '';
+}
+
 // The placeholder is an <svg>, which has no .hidden property, so both are
 // toggled through the attribute.
 function setAvatar(initialEl, placeholderEl, nameEl, name, fallback) {
     const trimmed = (name || '').trim();
-    if (trimmed) initialEl.textContent = trimmed.charAt(0).toUpperCase();
-    initialEl.toggleAttribute('hidden', !trimmed);
-    placeholderEl.toggleAttribute('hidden', !!trimmed);
+    const initial = avatarInitial(trimmed);
+    initialEl.textContent = initial;
+    initialEl.toggleAttribute('hidden', !initial);
+    placeholderEl.toggleAttribute('hidden', !!initial);
     nameEl.textContent = trimmed || fallback;
     nameEl.title = trimmed;
 }

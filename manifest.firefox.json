@@ -8,7 +8,9 @@
             "id": "{be7e9567-632c-47dc-bcb0-af29eda39f51}",
             "strict_min_version": "142.0",
             "data_collection_permissions": {
-                "required": ["none"],
+                "required": [
+                    "none"
+                ],
                 "optional": []
             }
         }
@@ -24,7 +26,9 @@
         "https://*/*"
     ],
     "background": {
-        "scripts": ["src/background.js"]
+        "scripts": [
+            "src/background.js"
+        ]
     },
     "content_security_policy": {
         "extension_pages": "script-src 'self'; object-src 'self'"
@@ -32,13 +36,34 @@
     "action": {
         "default_popup": "src/popup.html",
         "default_icon": {
+            "16": "images/icon16.png",
             "32": "images/icon32.png",
+            "48": "images/icon48.png",
             "64": "images/icon64.png",
             "128": "images/icon128.png"
-        }
+        },
+        "theme_icons": [
+            {
+                "light": "images/icon16-light.png",
+                "dark": "images/icon16.png",
+                "size": 16
+            },
+            {
+                "light": "images/icon32-light.png",
+                "dark": "images/icon32.png",
+                "size": 32
+            },
+            {
+                "light": "images/icon64-light.png",
+                "dark": "images/icon64.png",
+                "size": 64
+            }
+        ]
     },
     "icons": {
+        "16": "images/icon16.png",
         "32": "images/icon32.png",
+        "48": "images/icon48.png",
         "64": "images/icon64.png",
         "128": "images/icon128.png"
     }

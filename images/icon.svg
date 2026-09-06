@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Watch Together icon: two layered play glyphs on a squircle.
+       Source of the PNGs next to it; regenerate with images/make-icons.js. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5f6d"/>
+      <stop offset="1" stop-color="#d9243a"/>
+    </linearGradient>
+  </defs>
+  <path d="M64 0C113.9 0 128 14.1 128 64C128 113.9 113.9 128 64 128C14.1 128 0 113.9 0 64C0 14.1 14.1 0 64 0Z" fill="url(#g)"/>
+  <path d="M32 30 L74 53 L32 76 Z" fill="#fff" fill-opacity=".4" stroke="#fff" stroke-opacity=".4" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M52 50 L94 73 L52 96 Z" fill="#fff" stroke="#fff" stroke-width="14" stroke-linejoin="round"/>
+</svg>

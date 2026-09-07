@@ -6,7 +6,6 @@
     "homepage_url": "https://github.com/ZsomborBenedek/watch-together",
     "permissions": [
         "storage",
-        "activeTab",
         "scripting",
         "tabs"
     ],

@@ -33,15 +33,21 @@ const RATE_MAX_MESSAGES = 20;
 // how long a parasitic connection can be held open.
 const MAX_SESSION_MS = 6 * 60 * 60 * 1000;
 
-// A live client pings every 20s, so silence this long means the socket is
-// dead and its slot should go back to the room.
-const STALE_SOCKET_MS = 5 * 60 * 1000;
+// A live client pings every 20s, so three missed beats means the socket is
+// dead and its slot should go back to the room. This has to be short: until
+// the dead socket is reclaimed the room looks full, so the very client that
+// lost it is refused when it reconnects, and its partner is told a peer is
+// still there. Five minutes of that is what made sessions feel haunted.
+const STALE_SOCKET_MS = 60 * 1000;
 
 // Heartbeats are answered by the runtime without waking this object, so a
 // socket that only pings would never be seen by an activity-driven sweep and
 // could outlive every limit above. The alarm is the wake-up path that keeps
-// the limits honest; it only needs to be as fine-grained as they are.
-const SWEEP_ALARM_MS = 5 * 60 * 1000;
+// the limits honest, and it bounds how late a dead socket is noticed: worst
+// case is STALE_SOCKET_MS plus one alarm period. Each wake is one billed
+// request; at this rate a room open all day costs ~2,900 of the free plan's
+// 100,000.
+const SWEEP_ALARM_MS = 30 * 1000;
 
 // The extension only ever says two things here ('ping' is answered by the
 // runtime before it reaches us): a hello carrying one P-256 public key, and a
@@ -215,8 +221,11 @@ export class Room {
 
     // Tell everyone how many clients are in the room. The extension treats
     // n >= 2 as "connected" and n < 2 as "waiting for the other peer".
+    // Counted from sweep(), not the raw socket list: a socket that sweep has
+    // just told to close is still listed until the handshake completes, and
+    // counting it would tell a joiner a peer is present when nobody is.
     announcePeers(leaving) {
-        const sockets = this.state.getWebSockets().filter(s => s !== leaving);
+        const sockets = this.sweep().filter(s => s !== leaving);
         const message = JSON.stringify({ t: 'peers', n: sockets.length });
         for (const socket of sockets) {
             this.trySend(socket, message);

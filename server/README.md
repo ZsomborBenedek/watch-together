@@ -73,7 +73,7 @@ contents, so they keep working even though payloads are encrypted end to end.
 | Message rate | 20 per 10s per socket | a handful per session |
 | Connects per IP | 20 per minute | a handful per hour |
 | Session lifetime | 6 hours | one film |
-| Stale socket | closed after 5 min of silence | pings every 20s |
+| Stale socket | closed after 60s of silence | pings every 20s |
 
 The connect limit runs in the front worker, before a Durable Object is created
 or billed, so refused traffic costs nothing. It is per-IP and deliberately
@@ -91,8 +91,11 @@ a video can burst `seeked` events. Dead sockets are swept when the room next
 sees activity, which returns their slot before the capacity check — an idle room
 is hibernated and has nothing to reclaim. Because heartbeats are auto-answered
 without waking the object, a Durable Object alarm also runs the sweep every
-five minutes while sockets remain, so a client that only pings cannot outlive
-the session cap.
+30 seconds while sockets remain, so a client that only pings cannot outlive
+the session cap, and a dead socket is reclaimed within about 90 seconds.
+That bound matters: while a dead socket is still counted the room looks full,
+so the client that lost it is refused when it reconnects and its partner
+keeps seeing a peer that is gone.
 
 ## Costs
 

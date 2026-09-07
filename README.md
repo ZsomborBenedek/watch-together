@@ -55,9 +55,10 @@ still answers.
 ```
 
 Produces `build/chrome/` (load unpacked at `chrome://extensions`) and
-`build/firefox/` (load at `about:debugging`, or package with
-`web-ext build --source-dir build/firefox`). Both browsers run the same
-`src/background.js`; only the manifest differs.
+`build/firefox/` (load at `about:debugging`), and packages each as
+`web-ext-artifacts/watch_together-<version>-{chrome,firefox}.zip`, ready to
+upload to the stores. The version in the filename comes from the manifest.
+Both browsers run the same `src/background.js`; only the manifest differs.
 
 ## For reference
 

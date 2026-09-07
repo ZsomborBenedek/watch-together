@@ -1,11 +1,21 @@
 #!/bin/bash
-# Builds clean extension directories for Chrome and Firefox.
+# Builds clean extension directories for Chrome and Firefox, and packages
+# each as a store-ready zip.
 #   build/chrome/  — load as unpacked extension in Chrome
 #   build/firefox/ — load as temporary extension in Firefox (about:debugging)
-#                    or package with: web-ext build --source-dir build/firefox
+#   web-ext-artifacts/watch_together-<version>-{chrome,firefox}.zip
+#                  — upload to the Chrome Web Store / addons.mozilla.org
 #
-# Both browsers run the same src/background.js; only the manifest differs.
+# The version in the filename is read from the manifest, so the two can never
+# disagree. Both browsers run the same src/background.js; only the manifest
+# differs.
 set -e
+
+ARTIFACTS=web-ext-artifacts
+
+manifest_version() {
+    sed -nE 's/^ *"version": *"([^"]+)".*/\1/p' "$1" | head -n 1
+}
 
 build_common() {
     local OUT=$1
@@ -22,8 +32,36 @@ build_common() {
     cp "$MANIFEST" "$OUT/manifest.json"
 }
 
+# Zips from inside the build directory so manifest.json sits at the archive
+# root, which both stores require. -X drops macOS resource forks; the
+# exclusions keep .DS_Store and Finder metadata out.
+package() {
+    local DIR=$1
+    local BROWSER=$2
+    local VERSION
+    VERSION=$(manifest_version "$DIR/manifest.json")
+    if [ -z "$VERSION" ]; then
+        echo "error: no version found in $DIR/manifest.json" >&2
+        exit 1
+    fi
+    local ZIP="$ARTIFACTS/watch_together-$VERSION-$BROWSER.zip"
+    mkdir -p "$ARTIFACTS"
+    rm -f "$ZIP"
+    (cd "$DIR" && zip -rXq "../../$ZIP" . -x '.*' '__MACOSX/*')
+    echo "$BROWSER package: $ZIP"
+}
+
+CHROME_VERSION=$(manifest_version manifest.json)
+FIREFOX_VERSION=$(manifest_version manifest.firefox.json)
+if [ "$CHROME_VERSION" != "$FIREFOX_VERSION" ]; then
+    echo "error: manifest.json is $CHROME_VERSION but manifest.firefox.json is $FIREFOX_VERSION" >&2
+    exit 1
+fi
+
 build_common build/chrome manifest.json
 echo "Chrome build ready in build/chrome/"
+package build/chrome chrome
 
 build_common build/firefox manifest.firefox.json
 echo "Firefox build ready in build/firefox/"
+package build/firefox firefox

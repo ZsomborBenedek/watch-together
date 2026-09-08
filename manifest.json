@@ -1,16 +1,15 @@
 {
     "name": "Watch Together",
-    "version": "1.2",
+    "version": "1.2.1",
     "manifest_version": 3,
     "description": "Synchronized video playback with a friend over an end-to-end encrypted relay.",
     "homepage_url": "https://github.com/ZsomborBenedek/watch-together",
     "permissions": [
         "storage",
-        "activeTab",
         "scripting",
-        "tabs"
+        "activeTab"
     ],
-    "host_permissions": [
+    "optional_host_permissions": [
         "http://*/*",
         "https://*/*"
     ],

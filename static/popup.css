@@ -1008,3 +1008,80 @@ body {
         opacity: 1;
     }
 }
+
+/* --- Sync control: the decision the user most needs to see ------------- */
+
+.wt-sync-block {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.wt-segment-sync .sync-btn {
+    padding: 9px 10px;
+    font-size: 13px;
+}
+
+.wt-segment-sync .sync-btn.active {
+    background: var(--wt-accent);
+    color: var(--wt-on-accent);
+    box-shadow: 0 2px 8px rgba(226, 51, 63, 0.28);
+}
+
+.wt-segment-sync .sync-btn[data-sync="none"].active {
+    background: var(--wt-surface);
+    color: var(--wt-text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.wt-segment-sync .sync-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.wt-sync-status {
+    min-height: 1.3em;
+    font-size: 12px;
+    text-align: center;
+    color: var(--wt-text-muted);
+    white-space: pre-line;
+}
+
+.wt-footer[data-sync="page"] .wt-sync-status,
+.wt-footer[data-sync="all"] .wt-sync-status {
+    color: var(--wt-success);
+    font-weight: 600;
+}
+
+/* --- Peers row: connected and syncing-here are two different pictures --- */
+
+/* Traffic flowing: while this page syncs, green dashes keep travelling
+   between the two of you. */
+.wt-peers[data-phase="connected"][data-syncing="yes"] .wt-link-dots i {
+    background: var(--wt-success);
+    animation: wt-travel 1.6s linear infinite;
+}
+
+/* Connected, but the page under the popup is not syncing: the link stays,
+   but goes quiet — dashed grey line, muted check. */
+.wt-peers[data-phase="connected"][data-syncing="no"] .wt-link-line {
+    /* A gradient, not a dashed border: Chrome paints a dashed border on a
+       rounded zero-height box as a solid line, Firefox as dashes. This
+       paints the same everywhere. */
+    background: repeating-linear-gradient(90deg, var(--wt-border-strong) 0 6px, transparent 6px 12px);
+}
+
+.wt-peers[data-phase="connected"][data-syncing="no"] .wt-link-check {
+    background: var(--wt-surface-2);
+    color: var(--wt-text-muted);
+    box-shadow: 0 0 0 3px var(--wt-bg), inset 0 0 0 1.5px var(--wt-border-strong);
+    animation: none;
+    transform: none;
+    opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .wt-peers[data-phase="connected"][data-syncing="yes"] .wt-link-dots i {
+        animation: none;
+    }
+}

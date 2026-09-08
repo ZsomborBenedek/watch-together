@@ -143,13 +143,14 @@
     </main>
 
     <div id="footer" class="wt-footer" hidden>
-      <div id="syncToggle" class="wt-sync">
+      <div id="syncToggle" class="wt-sync wt-sync-block">
         <span class="wt-sync-label">Sync playback</span>
-        <div class="wt-segment" role="group" aria-label="Sync mode">
+        <div class="wt-segment wt-segment-wide wt-segment-sync" role="group" aria-label="Sync mode">
           <button class="sync-btn" data-sync="none" type="button">Off</button>
           <button class="sync-btn" data-sync="page" type="button">This page</button>
           <button class="sync-btn" data-sync="all" type="button">All tabs</button>
         </div>
+        <div id="syncStatus" class="wt-sync-status" role="status" aria-live="polite"></div>
       </div>
       <button id="backBtn" class="btn wt-btn wt-btn-danger-soft wt-btn-block" type="button">
         <svg class="wt-icon" aria-hidden="true"><use href="#i-logout" /></svg>

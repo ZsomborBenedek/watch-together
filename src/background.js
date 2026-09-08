@@ -68,9 +68,71 @@ let recvCounter = 0;
 let connectionGeneration = 0;
 let connecting = false;
 
-let syncEnabled = false;
+// Sync is opt-in and per tab. The mode is the user's standing choice:
+//   none — nothing syncs
+//   page — one tab: the one the popup was on when This page was chosen
+//   all  — every tab the popup is opened on, until it closes or Off
+// The only site access is activeTab: the click that opens the popup grants
+// it for that tab, so a tab can only ever join by that click. Nothing is
+// asked for at install, and nothing is injected anywhere else.
 let syncMode = 'none';
-let syncTabId = null;
+const syncedTabs = new Set();
+// The tab the popup is open on, for as long as it is open (it holds a port).
+let popupTabId = null;
+
+// Site access is asked for on the mode buttons, never at install: This page
+// asks for that site, All tabs for every site. Without the broad grant, All
+// tabs means every tab the popup is opened on; with it, every page with a
+// video, opened or not — the way it worked before.
+const ALL_SITES = ['http://*/*', 'https://*/*'];
+let allSitesGranted = false;
+
+function refreshAllSitesGranted() {
+    chrome.permissions.contains({ origins: ALL_SITES }, function (granted) {
+        allSitesGranted = !!granted;
+    });
+}
+refreshAllSitesGranted();
+chrome.permissions.onRemoved.addListener(refreshAllSitesGranted);
+
+// A mode that needs access is not applied until the access exists. The
+// popup asks, but the browser may close it to show the prompt — so the
+// answer is taken from the grant event here, not from the popup: allow, and
+// the mode goes on even with the popup gone; refuse, and nothing fires, so
+// the previous mode simply stays. That is the revert.
+let pendingMode = null;
+
+function applyPendingIfGranted() {
+    const pending = pendingMode;
+    if (!pending) return;
+    const origins = pending.mode === 'all' ? ALL_SITES : [pending.pattern];
+    chrome.permissions.contains({ origins }, function (granted) {
+        if (!granted || pendingMode !== pending) return;
+        pendingMode = null;
+        setSyncMode(pending.mode, pending.tabId);
+    });
+}
+
+chrome.permissions.onAdded.addListener(function () {
+    refreshAllSitesGranted();
+    applyPendingIfGranted();
+});
+
+// The background's memory dies with it and comes back empty. Firefox ends an
+// idle event page after ~30s, so the very event that needs this — a reload
+// of a synced tab — is often what wakes the script; it must not look before
+// the stored copy has been read back.
+const syncStateLoaded = new Promise(function (resolve) {
+    chrome.storage.local.get(['sync', 'syncedTabs'], function (result) {
+        syncMode = normalizeMode(result.sync);
+        for (const id of result.syncedTabs || []) syncedTabs.add(id);
+        resolve();
+    });
+});
+
+function normalizeMode(value) {
+    return value === 'page' || value === 'all' ? value : 'none';
+}
 
 chrome.runtime.onInstalled.addListener(function () {
     console.log('Watchtogether extension installed!');
@@ -80,45 +142,27 @@ chrome.runtime.onInstalled.addListener(function () {
         connected: false,
         relayOpen: false,
         peerName: null,
-        sync: 'none'
+        sync: 'none',
+        syncedTabs: []
     });
 });
 
 // A Chrome service worker that was evicted mid-session comes back with no
 // socket, so rebuild it from what the popup last stored.
-chrome.runtime.onStartup.addListener(restoreSession);
+chrome.runtime.onStartup.addListener(function () {
+    // A browser restart renumbers tabs, so last session's ids mean nothing.
+    syncedTabs.clear();
+    chrome.storage.local.set({ syncedTabs: [] }, restoreSession);
+});
 restoreSession();
 
 function restoreSession() {
     if (socket || connecting) return;
-    chrome.storage.local.get(['roomCode', 'state', 'sync', 'syncTabId'], function (result) {
+    chrome.storage.local.get(['roomCode', 'state'], function (result) {
         if (socket || connecting) return;
         if (result.state !== 'session' || !result.roomCode) return;
-        // The in-memory sync mode died with the previous worker, and writing
-        // an unchanged value back to storage fires no onChanged event, so it
-        // has to be rebuilt here or every frame is dropped until the user
-        // toggles the setting.
-        restoreSyncMode(result.sync, result.syncTabId);
         openSocket(result.roomCode);
     });
-}
-
-// Like the storage listener, but for a worker restarting mid-session:
-// 'page' mode keeps the tab it was bound to instead of re-picking whichever
-// tab happens to be active now.
-function restoreSyncMode(stored, storedTabId) {
-    let mode = stored;
-    if (mode === true) mode = 'all';
-    if (mode === false || mode == null) mode = 'none';
-    if (mode === 'page' && typeof storedTabId === 'number') {
-        syncMode = 'page';
-        syncEnabled = true;
-        syncTabId = storedTabId;
-        chrome.tabs.onUpdated.addListener(onTabUpdated);
-        chrome.tabs.onRemoved.addListener(onTabRemoved);
-        return;
-    }
-    syncVids(mode);
 }
 
 /* ------------------------------- relay ---------------------------------- */
@@ -306,7 +350,9 @@ async function onHello(encodedKey, generation) {
     // Only now can anything actually be exchanged, so this is the honest
     // moment to call the session connected.
     chrome.storage.local.set({ connected: true, connectionError: null });
-    chrome.storage.local.set({ sync: 'all' });
+    // Connection and sync meet here only: in All-tabs mode, a popup open on
+    // a page when the peers connect means that page joins now.
+    syncPopupTab();
 
     // Covers the peer that was already waiting when we arrived and therefore
     // missed the announcement that prompted our own offer.
@@ -450,7 +496,7 @@ async function onRelayMessage(data, generation) {
             if (typeof frame.name === 'string') {
                 // Who we are connected with, as they chose to be called.
                 chrome.storage.local.set({ peerName: cleanName(frame.name) || null });
-            } else if (syncEnabled && frame.s) {
+            } else if (syncedTabs.size > 0 && frame.s) {
                 console.log(frame.s);
                 chrome.storage.local.set({ videoState: frame.s });
             }
@@ -561,16 +607,14 @@ function leaveSession() {
     roomCode = null;
     reconnectAttempts = 0;
     closeSocket();
-    syncEnabled = false;
-    syncMode = 'none';
-    syncTabId = null;
+    // The one place session teardown reaches into sync.
+    setSyncMode('none');
     chrome.storage.local.set({
         roomCode: null,
         state: 'start',
         connected: false,
         relayOpen: false,
         peerName: null,
-        sync: 'none',
         connectionError: null
     });
 }
@@ -609,79 +653,95 @@ async function sendName(generation) {
 
 /* ----------------------------- tab syncing ------------------------------ */
 
-function syncVids(mode) {
-    syncMode = mode;
-    chrome.tabs.onActivated.removeListener(onTabActivated);
-    chrome.tabs.onUpdated.removeListener(onTabUpdated);
-    chrome.tabs.onRemoved.removeListener(onTabRemoved);
-
-    if (mode === 'all') {
-        syncEnabled = true;
-        injectContentScript();
-        chrome.tabs.onActivated.addListener(onTabActivated);
-        chrome.tabs.onUpdated.addListener(onTabUpdated);
-    } else if (mode === 'page') {
-        syncEnabled = true;
-        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            if (tabs.length === 0) return;
-            const tab = tabs[0];
-            if (!tab.url || !tab.url.startsWith('http')) return;
-            syncTabId = tab.id;
-            chrome.storage.local.set({ syncTabId: tab.id });
-            chrome.scripting.executeScript({
-                target: { tabId: tab.id },
-                files: ['src/content.js']
-            }, _ => {
-                let e = chrome.runtime.lastError;
-                if (e !== undefined) console.log(_, e);
-            });
-            chrome.tabs.onUpdated.addListener(onTabUpdated);
-            chrome.tabs.onRemoved.addListener(onTabRemoved);
-        });
-    } else {
-        syncEnabled = false;
-        syncTabId = null;
-    }
+function storeSyncedTabs() {
+    chrome.storage.local.set({ syncedTabs: [...syncedTabs] });
 }
 
-function injectContentScript() {
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        if (tabs.length === 0) return;
-        const tab = tabs[0];
-        if (!tab.url || !tab.url.startsWith('http')) return;
-        chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['src/content.js']
-        }, _ => {
-            let e = chrome.runtime.lastError;
-            if (e !== undefined) console.log(_, e);
-        });
+function tellTab(tabId, enabled) {
+    chrome.tabs.sendMessage(tabId, { action: 'setSyncEnabled', enabled }, function () {
+        void chrome.runtime.lastError; // no script there to tell
     });
 }
 
-function onTabActivated(activeInfo) {
-    injectContentScript();
+// Injects into a tab and starts syncing it. Only ever works on a tab the
+// popup is open on — that click is the activeTab grant — or, in Chrome, on
+// the same site after a reload. Anything else fails and the tab is dropped;
+// opening the popup on it again is the way back in.
+function enableTab(tabId) {
+    chrome.scripting.executeScript({ target: { tabId }, files: ['src/content.js'] }, function () {
+        const error = chrome.runtime.lastError;
+        if (error) {
+            console.log('cannot sync tab', tabId, error.message);
+            if (syncedTabs.delete(tabId)) storeSyncedTabs();
+            return;
+        }
+        syncedTabs.add(tabId);
+        storeSyncedTabs();
+        tellTab(tabId, true);
+    });
 }
 
-function onTabUpdated(tabId, changeInfo, tab) {
+function disableTab(tabId) {
+    if (syncedTabs.delete(tabId)) storeSyncedTabs();
+    tellTab(tabId, false);
+}
+
+function disableAllTabs() {
+    for (const tabId of syncedTabs) tellTab(tabId, false);
+    syncedTabs.clear();
+    storeSyncedTabs();
+}
+
+// Applies a mode the user chose in the popup, on the tab it was open on.
+function setSyncMode(mode, tabId) {
+    syncMode = normalizeMode(mode);
+    chrome.storage.local.set({ sync: syncMode });
+    if (syncMode === 'none') {
+        disableAllTabs();
+    } else if (syncMode === 'page') {
+        // One tab: the one the choice was made on. Choosing This page again
+        // from another tab moves the sync there.
+        for (const id of [...syncedTabs]) if (id !== tabId) disableTab(id);
+        if (typeof tabId === 'number') enableTab(tabId);
+    } else if (typeof tabId === 'number') {
+        enableTab(tabId);
+    }
+}
+
+// In All-tabs mode a page the popup is open on joins: when the popup opens
+// during a session, and when the peers connect with it already open.
+function syncPopupTab() {
+    if (popupTabId === null || syncMode !== 'all') return;
+    enableTab(popupTabId);
+}
+
+// A full page load in a synced tab takes its content script with it; put it
+// back. That works wherever the site was allowed, and in Chrome also on the
+// same site under activeTab alone. With every site allowed, All tabs also
+// reaches pages the popup was never opened on — the url is only visible
+// where we hold that access, which is exactly where injecting can work.
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
     if (changeInfo.status !== 'complete') return;
-    if (!tab.url || !tab.url.startsWith('http')) return;
-    if (syncMode === 'page' && tabId !== syncTabId) return;
-    chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['src/content.js']
-    }, _ => {
-        let e = chrome.runtime.lastError;
-        if (e !== undefined) console.log(_, e);
+    syncStateLoaded.then(function () {
+        if (syncedTabs.has(tabId)) return enableTab(tabId);
+        if (syncMode === 'all' && allSitesGranted && roomCode && /^https?:/.test(tab.url || '')) enableTab(tabId);
     });
-}
+});
 
-function onTabRemoved(tabId) {
-    if (tabId === syncTabId) {
-        syncTabId = null;
-        chrome.storage.local.set({ sync: 'none', syncTabId: null });
-    }
-}
+chrome.tabs.onActivated.addListener(function (activeInfo) {
+    syncStateLoaded.then(function () {
+        if (syncMode !== 'all' || !allSitesGranted || !roomCode) return;
+        chrome.tabs.get(activeInfo.tabId, function (tab) {
+            if (chrome.runtime.lastError || !tab || !/^https?:/.test(tab.url || '')) return;
+            if (!syncedTabs.has(tab.id)) enableTab(tab.id);
+        });
+    });
+});
+
+chrome.tabs.onRemoved.addListener(function (tabId) {
+    if (syncedTabs.delete(tabId)) storeSyncedTabs();
+    if (popupTabId === tabId) popupTabId = null;
+});
 
 /* ------------------------------ messaging ------------------------------- */
 
@@ -697,20 +757,44 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     } else if (request.action === 'relayChanged') {
         // Reopen the same room against the newly configured relay.
         if (roomCode) openSocket(roomCode);
+    } else if (request.action === 'requestSyncMode') {
+        const usable = (request.mode === 'all' || request.mode === 'page') &&
+            typeof request.tabId === 'number' && typeof request.pattern === 'string';
+        pendingMode = usable ? { mode: request.mode, tabId: request.tabId, pattern: request.pattern } : null;
+    } else if (request.action === 'setSyncMode') {
+        pendingMode = null;
+        syncStateLoaded.then(function () {
+            setSyncMode(request.mode, request.tabId);
+        });
     } else if (request.action === 'sendState') {
-        if (!syncEnabled) return;
-        if (syncMode === 'page' && sender.tab?.id !== syncTabId) return;
-        sendState(request.content).catch(error => console.log('send failed', error));
+        syncStateLoaded.then(function () {
+            if (!sender.tab || !syncedTabs.has(sender.tab.id)) return;
+            sendState(request.content).catch(error => console.log('send failed', error));
+        });
     }
 });
 
-chrome.storage.onChanged.addListener(function (changes, namespace) {
-    for (var key in changes) {
-        if (key === 'sync') {
-            let val = changes[key].newValue;
-            if (val === true) val = 'all';
-            if (val === false || val == null) val = 'none';
-            syncVids(val);
-        }
-    }
+// The popup holds this port for as long as it is open, so its closing is
+// known too — and with it, that no page is being pointed at any more.
+chrome.runtime.onConnect.addListener(function (port) {
+    if (port.name !== 'popup') return;
+    port.onMessage.addListener(function (message) {
+        if (!message || message.action !== 'popupOpened') return;
+        // Only an http(s) page can be synced; anything else must not be
+        // remembered as the popup's tab.
+        const usable = typeof message.tabId === 'number' && message.canSync === true;
+        popupTabId = usable ? message.tabId : null;
+        // A fresh popup means any earlier prompt has been answered by now.
+        pendingMode = null;
+        // Stored state, not roomCode: a worker restarted a moment ago is
+        // still rebuilding the session, and this popup may be why.
+        chrome.storage.local.get('state', function (result) {
+            syncStateLoaded.then(function () {
+                if (result.state === 'session') syncPopupTab();
+            });
+        });
+    });
+    port.onDisconnect.addListener(function () {
+        popupTabId = null;
+    });
 });

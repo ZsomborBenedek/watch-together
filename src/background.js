@@ -60,7 +60,14 @@ let helloSent = false;
 // moment they reconnected, without ever announcing the room emptying in
 // between. Every reconnect generates a fresh keypair, so a key is never
 // legitimately seen twice.
+//
+// The set is capped, since hellos are relay-controlled. Evicting old keys
+// would hand a relay the replay back — evict the real one, replay it — so an
+// overflow reconnects instead: a fresh keypair makes every hello recorded
+// so far worthless, and the set starts empty. A real peer reconnecting even
+// once a minute for a whole film stays well inside the cap.
 const peerKeysSeen = new Set();
+const MAX_PEER_KEYS = 512;
 
 // Frames carry a per-connection counter, because AES-GCM authenticates a
 // replayed recording just as happily as a fresh frame: without this, a relay
@@ -382,6 +389,11 @@ async function sendHello(generation) {
 
 async function onHello(encodedKey, generation) {
     if (!keyPair || typeof encodedKey !== 'string' || peerKeysSeen.has(encodedKey)) return;
+    if (peerKeysSeen.size >= MAX_PEER_KEYS) {
+        console.log('too many handshakes on one connection; renegotiating from scratch');
+        openSocket(roomCode);
+        return;
+    }
     let derived;
     try {
         derived = await deriveSessionKey(fromBase64(encodedKey));

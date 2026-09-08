@@ -157,8 +157,8 @@ const shots = [
         file: 'screenshot-5-light-dark.png', w: 1280, h: 800,
         body: `
           ${head({ title: 'Light or dark, your call', sub: 'Follows your system theme, or pin the one you like. Sync this page only, all tabs, or switch it off while you keep the room open.' })}
-          ${popup('popup-connected-light.png', 270, 300)}
-          ${popup('popup-connected-dark.png', 670, 300)}`,
+          ${popup('popup-connected-light.png', 270, 270)}
+          ${popup('popup-connected-dark.png', 670, 270)}`,
     },
 ];
 

@@ -22,11 +22,14 @@ npm run build                                       # capture, then compose
 
 `capture.js` launches two separate Chrome for Testing profiles with the
 extension loaded, has Alice create a room and Bob join it over the real relay,
-then pauses both demo pages on the same frame and captures the popup states and
-pages at 2×. It runs headed, since Chrome only fires tab activation (which is
-what injects the content script) in a real window. `compose.js` lays the
-captures out as HTML, renders each image with headless Chrome and flattens it
-with sharp.
+turns on All tabs in both popups, then pauses both demo pages on the same
+frame and captures the popup states and pages at 2×. It runs headed, since
+Chrome only fires tab activation in a real window. Sync needs the all-sites
+access a user grants through Chrome's own permission prompt, which puppeteer
+cannot press, so the script loads a copy of the build (`profiles/extension`)
+whose manifest carries that grant; the scripts and popup in it are untouched.
+`compose.js` lays the captures out as HTML, renders each image with headless
+Chrome and flattens it with sharp.
 
 Text and layout changes only need the compose step, and it can be limited to
 the images whose name contains an argument:

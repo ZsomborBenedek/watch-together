@@ -6,13 +6,28 @@ const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs');
 
-const EXT = path.join(__dirname, '..', 'build', 'chrome');
+const BUILD = path.join(__dirname, '..', 'build', 'chrome');
+const EXT = path.join(__dirname, 'profiles', 'extension');
 const OUT = path.join(__dirname, 'captures');
 const DEMO = 'http://localhost:8080/';
 const HEADLESS = process.env.HEADFUL ? false : true;
 fs.mkdirSync(OUT, { recursive: true });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// The images show the extension after the user has allowed All tabs. That
+// grant comes from Chrome's own permission prompt, native UI puppeteer cannot
+// press, so the copy loaded here carries it in its manifest instead. The
+// scripts and popup are the shipped build, untouched.
+function prepareExtension() {
+    fs.rmSync(EXT, { recursive: true, force: true });
+    fs.cpSync(BUILD, EXT, { recursive: true });
+    const manifestPath = path.join(EXT, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.host_permissions = manifest.optional_host_permissions;
+    delete manifest.optional_host_permissions;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 4));
+}
 
 async function launch(name) {
     const userDataDir = path.join(__dirname, 'profiles', name);
@@ -87,6 +102,7 @@ async function shotPage(page, file) {
 }
 
 (async () => {
+    prepareExtension();
     const A = await launch('alice');
     const B = await launch('bob');
     console.log('extension ids', A.id, B.id);
@@ -138,6 +154,24 @@ async function shotPage(page, file) {
     await sleep(600);
     console.log('  connected');
 
+    // Sync is opt-in: a mode is picked in the popup, on the page with the
+    // video. Loaded in a tab, the popup takes "the page it is on" from the
+    // active tab at load time, so each popup is reloaded while its demo tab
+    // is in front, and All tabs chosen on it. The access it asks for is
+    // already held (see prepareExtension), so no prompt appears and the
+    // background injects the content script into the demo tab.
+    console.log('turn sync on');
+    for (const [demo, pop] of [[demoA, popA], [demoB, popB]]) {
+        await demo.bringToFront();
+        await pop.reload({ waitUntil: 'load' });
+        await sleep(300);
+        await pop.bringToFront();
+        await pop.click('.sync-btn[data-sync="all"]');
+        await waitStorage(pop, 'syncedTabs', v => Array.isArray(v) && v.length > 0);
+    }
+    await sleep(600);
+    console.log('  syncing');
+
     await shotPopup(popA, 'popup-connected-dark.png');
     await storage(popA, 'theme', 'light');
     await sleep(200);
@@ -150,8 +184,7 @@ async function shotPage(page, file) {
     await popA.click('#settings summary');
     await sleep(200);
 
-    // Make the demo tabs active so the content script is injected, then
-    // drive playback from Alice's side and let Bob's page follow.
+    // Drive playback from Alice's side and let Bob's page follow.
     console.log('sync playback');
     await demoA.bringToFront();
     await demoB.bringToFront();

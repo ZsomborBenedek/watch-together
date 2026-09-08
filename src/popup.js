@@ -109,6 +109,15 @@ function siteOf(url) {
     return { host: parsed.hostname, pattern: parsed.protocol + '//' + parsed.hostname + '/*' };
 }
 
+// The grant can be changed outside the popup, in the browser's extension
+// settings, so it is re-read on every permission change rather than once.
+function refreshPermissions() {
+    chrome.permissions.contains({ origins: ALL_SITES }, function (granted) {
+        allSitesGranted = !!granted;
+        renderSync();
+    });
+}
+
 function syncingHere() {
     return currentTabId !== null && syncedTabs.includes(currentTabId);
 }
@@ -359,10 +368,12 @@ function initPopup() {
         renderSync();
         port.postMessage({ action: 'popupOpened', tabId: currentTabId, canSync: currentTabHost !== null });
     });
-    chrome.permissions.contains({ origins: ALL_SITES }, function (granted) {
-        allSitesGranted = !!granted;
-        renderSync();
-    });
+    refreshPermissions();
+    // Access changed while the popup is open — from the mode buttons or from
+    // the browser's extension settings — shows up straight away. The mode
+    // itself is the background's to turn off; that arrives through storage.
+    chrome.permissions.onAdded.addListener(refreshPermissions);
+    chrome.permissions.onRemoved.addListener(refreshPermissions);
 
     newSessionBtn.addEventListener('click', function () {
         relayOpen = false;

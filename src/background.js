@@ -52,7 +52,22 @@ let keyPair = null;
 let sessionKey = null;
 let keySalt = null;
 let helloSent = false;
-let helloReceived = false;
+// Peer public keys already accepted on this connection. A hello carrying one
+// of these is a repeat (a relay replaying the handshake) and must not
+// re-derive the key and reset the replay counters with it — not even after a
+// "peers: 1" announcement, which a relay can fake. A hello carrying a key not
+// in here is a new peer: one whose dead socket the relay reclaimed at the
+// moment they reconnected, without ever announcing the room emptying in
+// between. Every reconnect generates a fresh keypair, so a key is never
+// legitimately seen twice.
+//
+// The set is capped, since hellos are relay-controlled. Evicting old keys
+// would hand a relay the replay back — evict the real one, replay it — so an
+// overflow reconnects instead: a fresh keypair makes every hello recorded
+// so far worthless, and the set starts empty. A real peer reconnecting even
+// once a minute for a whole film stays well inside the cap.
+const peerKeysSeen = new Set();
+const MAX_PEER_KEYS = 512;
 
 // Frames carry a per-connection counter, because AES-GCM authenticates a
 // replayed recording just as happily as a fresh frame: without this, a relay
@@ -93,7 +108,48 @@ function refreshAllSitesGranted() {
     });
 }
 refreshAllSitesGranted();
-chrome.permissions.onRemoved.addListener(refreshAllSitesGranted);
+
+// The pattern the popup asks access for on a given page; null where nothing
+// can be synced, or where the url is not visible to us at all.
+function sitePatternOf(url) {
+    let parsed;
+    try { parsed = new URL(url || ''); } catch (error) { return null; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.protocol + '//' + parsed.hostname + '/*';
+}
+
+// Access can be taken away in the browser's extension settings as well as
+// granted from the popup. A mode is only ever applied on the access it asked
+// for, so losing that access turns the mode off — and tells the synced tabs,
+// so they stop now rather than at their next reload.
+function dropModeWithoutAccess() {
+    syncStateLoaded.then(function () {
+        if (syncMode === 'all') {
+            chrome.permissions.contains({ origins: ALL_SITES }, function (granted) {
+                if (!granted && syncMode === 'all') setSyncMode('none');
+            });
+        } else if (syncMode === 'page') {
+            for (const tabId of [...syncedTabs]) {
+                chrome.tabs.get(tabId, function (tab) {
+                    // The url is only visible where we still hold access.
+                    const pattern = chrome.runtime.lastError || !tab ? null : sitePatternOf(tab.url);
+                    if (!pattern) {
+                        if (syncMode === 'page') setSyncMode('none');
+                        return;
+                    }
+                    chrome.permissions.contains({ origins: [pattern] }, function (granted) {
+                        if (!granted && syncMode === 'page') setSyncMode('none');
+                    });
+                });
+            }
+        }
+    });
+}
+
+chrome.permissions.onRemoved.addListener(function () {
+    refreshAllSitesGranted();
+    dropModeWithoutAccess();
+});
 
 // A mode that needs access is not applied until the access exists. The
 // popup asks, but the browser may close it to show the prompt — so the
@@ -134,7 +190,12 @@ function normalizeMode(value) {
     return value === 'page' || value === 'all' ? value : 'none';
 }
 
-chrome.runtime.onInstalled.addListener(function () {
+chrome.runtime.onInstalled.addListener(function (details) {
+    // Fresh installs only. This also fires on update, where the session and
+    // sync mode must survive: the reads issued above already returned the old
+    // values, so wiping storage here would leave the background connected to
+    // a room the popup no longer knows about.
+    if (details.reason !== 'install') return;
     console.log('Watchtogether extension installed!');
     chrome.storage.local.set({
         roomCode: null,
@@ -151,8 +212,12 @@ chrome.runtime.onInstalled.addListener(function () {
 // socket, so rebuild it from what the popup last stored.
 chrome.runtime.onStartup.addListener(function () {
     // A browser restart renumbers tabs, so last session's ids mean nothing.
-    syncedTabs.clear();
-    chrome.storage.local.set({ syncedTabs: [] }, restoreSession);
+    // Only after the stored copy has been read back, or that read lands
+    // afterwards and puts them straight back.
+    syncStateLoaded.then(function () {
+        syncedTabs.clear();
+        chrome.storage.local.set({ syncedTabs: [] }, restoreSession);
+    });
 });
 restoreSession();
 
@@ -323,9 +388,12 @@ async function sendHello(generation) {
 }
 
 async function onHello(encodedKey, generation) {
-    // One hello per connection: a repeat (a relay replaying the handshake)
-    // must not re-derive the key and reset the replay counters with it.
-    if (helloReceived || !keyPair || typeof encodedKey !== 'string') return;
+    if (!keyPair || typeof encodedKey !== 'string' || peerKeysSeen.has(encodedKey)) return;
+    if (peerKeysSeen.size >= MAX_PEER_KEYS) {
+        console.log('too many handshakes on one connection; renegotiating from scratch');
+        openSocket(roomCode);
+        return;
+    }
     let derived;
     try {
         derived = await deriveSessionKey(fromBase64(encodedKey));
@@ -341,8 +409,8 @@ async function onHello(encodedKey, generation) {
     // The connection this hello arrived on may be gone by now; a key derived
     // for it must not be attached to whatever replaced it.
     if (generation !== connectionGeneration) return;
-    if (helloReceived) return;
-    helloReceived = true;
+    if (peerKeysSeen.has(encodedKey)) return;
+    peerKeysSeen.add(encodedKey);
     sessionKey = derived;
     sendCounter = 0;
     recvCounter = 0;
@@ -379,7 +447,7 @@ async function openSocket(code) {
     // answered the handshake.
     sessionKey = null;
     helloSent = false;
-    helloReceived = false;
+    peerKeysSeen.clear();
     const pair = await newKeyPair();
 
     // The relay is addressed by a stretched hash of the code, so the code
@@ -453,6 +521,9 @@ async function openSocket(code) {
 }
 
 async function onRelayMessage(data, generation) {
+    // Queued behind a slow key derivation, a message can run after the
+    // socket it arrived on has been replaced; it must not touch the new one.
+    if (generation !== connectionGeneration) return;
     if (data === 'pong') return;
 
     let message;
@@ -468,10 +539,10 @@ async function onRelayMessage(data, generation) {
             await sendHello(generation);
         } else {
             // The peer is gone and their key with them; the next one to arrive
-            // negotiates afresh.
+            // negotiates afresh. The keys already seen are kept: they are
+            // what stops a replayed hello from reopening the old key.
             sessionKey = null;
             helloSent = false;
-            helloReceived = false;
             chrome.storage.local.set({ connected: false, peerName: null });
         }
         return;
@@ -555,7 +626,7 @@ function closeSocket() {
     sessionKey = null;
     keySalt = null;
     helloSent = false;
-    helloReceived = false;
+    peerKeysSeen.clear();
     keyPair = null;
     stopHeartbeat();
     if (reconnectTimer) {

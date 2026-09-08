@@ -55,7 +55,7 @@ The extension keeps the following in your browser's extension storage, on
 your device only:
 
 - your current room and connection state
-- your sync mode (Off / This page / All tabs) and appearance setting
+- your sync mode (Off / This page / All tabs), which tabs are syncing, and your appearance setting
 - your display name, and your friend's display name for the current session
 - the relay address, if you set one
 

@@ -21,6 +21,14 @@ if (window.contentScriptVideo !== true) {
     // injection time and going stale.
     const watched = new WeakSet();
 
+    // The background switches a tab off — the user's choice, or the session
+    // ending — by message, since it cannot remove a script it injected.
+    // Injection itself means on.
+    let enabled = true;
+    chrome.runtime.onMessage.addListener(function (message) {
+        if (message && message.action === 'setSyncEnabled') enabled = !!message.enabled;
+    });
+
     watchVideos();
     sendState();
 
@@ -74,6 +82,7 @@ if (window.contentScriptVideo !== true) {
     }
 
     function sendState() {
+        if (!enabled) return;
         const video = currentVideo();
         if (!video || video.readyState <= 2) return;
 
@@ -105,7 +114,7 @@ if (window.contentScriptVideo !== true) {
 
     chrome.storage.onChanged.addListener(function (changes, namespace) {
         for (var key in changes) {
-            if (key !== 'videoState') continue;
+            if (key !== 'videoState' || !enabled) continue;
 
             const videoState = changes[key].newValue;
             if (!videoState || videoState.hostname !== window.location.hostname) continue;

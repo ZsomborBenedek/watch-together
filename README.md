@@ -19,9 +19,16 @@ transmitted and stored is spelled out in [PRIVACY.md](PRIVACY.md).
 2. One person presses **Create a room** and shares the room code
    (e.g. `ABC-DEF-GHI`) — there is a Copy button next to it.
 3. The other presses **Join with a code**, types it in, and presses **Connect**.
-4. Once both are in, visiting the same site with any video keeps playback in
-   sync. Use the **Sync playback** toggle at the bottom to sync **This page**
-   only, **All tabs**, or turn it **Off**.
+4. Sync is off until you turn it on. Open the page with the video, click the
+   extension icon there and pick **This page** (just that tab) or **All
+   tabs** (every tab you open the popup on from then on). The peers row shows
+   green traffic while the page you are on is syncing, and a quiet dashed
+   link when you are connected but it is not. Picking a mode is when the
+   browser asks for access — **This page** for that one site, **All tabs**
+   for every site; allow it and the mode survives reloads, and All tabs then
+   reaches every page with a video even where you never opened the popup.
+   Decline, and it still works on the tabs you open the popup on, until they
+   reload. Nothing is granted at install.
 
 Under **Settings** you can also give yourself a name, which is shown to the
 person you connect with (it travels inside the encrypted channel, so the relay

@@ -35,6 +35,7 @@ const relayUrl = document.getElementById('relayUrl');
 const saveRelayBtn = document.getElementById('saveRelayBtn');
 const relayHint = document.getElementById('relayHint');
 const syncBtns = document.querySelectorAll('.sync-btn');
+const syncStatus = document.getElementById('syncStatus');
 const themeBtns = document.querySelectorAll('.theme-btn');
 
 // The markup is the one source for the resting hint copy, so a transient
@@ -42,6 +43,22 @@ const themeBtns = document.querySelectorAll('.theme-btn');
 const DEFAULT_RELAY_HINT = relayHint.textContent;
 const DEFAULT_NAME_HINT = nameHint.textContent;
 const NAME_MAX_LENGTH = 24;
+
+// Sync is opt-in and per tab, and a tab can only join by this popup being
+// opened on it — that click is the activeTab grant, the only site access
+// the extension has. So the popup needs to know which tab it is on, and
+// which tabs are syncing, to say plainly whether this one is.
+// Site access is asked for on the mode buttons — This page for that site,
+// All tabs for every site — and never at install. It is what makes a mode
+// outlast a reload; All tabs with every site allowed also reaches pages
+// this popup was never opened on.
+const ALL_SITES = ['http://*/*', 'https://*/*'];
+let currentSync = 'none';
+let currentTabId = null;
+let currentTabHost = null;
+let currentTabPattern = null;
+let allSitesGranted = false;
+let syncedTabs = [];
 
 // Everything the session view shows is derived from these five, so a change
 // to any of them re-renders the lot rather than patching pieces in place.
@@ -79,12 +96,50 @@ function setState(state) {
 }
 
 function setSyncMode(mode) {
-    let val = mode;
-    if (val === true) val = 'all';
-    if (val === false || val == null) val = 'none';
-    syncBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.sync === val);
+    currentSync = mode === 'page' || mode === 'all' ? mode : 'none';
+    renderSync();
+}
+
+function siteOf(url) {
+    let parsed;
+    try { parsed = new URL(url || ''); } catch (error) { return null; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    // No port: a pattern without one matches every port, so a dev server on
+    // localhost:8080 and the same host on 443 are one grant.
+    return { host: parsed.hostname, pattern: parsed.protocol + '//' + parsed.hostname + '/*' };
+}
+
+// Must run straight from a click, and after whatever the click was for: the
+// browser may close this popup to show its prompt, taking any pending
+// callback with it, so nothing depends on the answer.
+function requestAccess(origins) {
+    chrome.permissions.request({ origins }, function () {
+        void chrome.runtime.lastError;
     });
+}
+
+function syncingHere() {
+    return currentTabId !== null && syncedTabs.includes(currentTabId);
+}
+
+function renderSync() {
+    const canSync = currentTabHost !== null;
+    const here = syncingHere();
+    syncBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.sync === currentSync);
+        btn.disabled = btn.dataset.sync !== 'none' && !canSync;
+    });
+    footer.dataset.sync = currentSync;
+    let text;
+    if (currentSync === 'none') text = 'Not syncing. Pick This page or All tabs.';
+    else if (here) text = currentSync === 'all'
+        ? (allSitesGranted ? 'Syncing this tab — and every page with a video.' : 'Syncing this tab — and every tab you open this popup on.')
+        : 'Syncing this tab.';
+    else if (!canSync) text = 'Open the page with the video, then click the icon there.';
+    else if (currentSync === 'page') text = 'Syncing another tab. Choose This page again to sync this one instead.';
+    else text = 'This tab is not syncing yet.';
+    syncStatus.textContent = text;
+    renderSession();
 }
 
 // The stored preference wins; with none stored the page follows the system,
@@ -139,6 +194,7 @@ function renderSession() {
 
     // Peers row.
     peers.dataset.phase = phase;
+    peers.dataset.syncing = phase === 'connected' && syncingHere() ? 'yes' : 'no';
     setAvatar(youInitial, youPlaceholder, youName, myName, 'You');
     const showFriend = phase === 'connected' ? friendName : null;
     setAvatar(peerInitial, peerPlaceholder, peerName, showFriend, 'Friend');
@@ -149,8 +205,10 @@ function renderSession() {
     if (phase === 'error') {
         statusText.textContent = lastError;
     } else if (phase === 'connected') {
+        // Whether this page syncs is said by the peers row and the sync
+        // control, not here; this line is about the connection only.
         statusText.textContent = friendName
-            ? 'Connected with ' + friendName + ' — playback stays in sync.'
+            ? 'Connected with ' + friendName + '.'
             : 'Connected — your friend is here.';
     } else if (phase === 'waiting') {
         statusText.textContent = 'Waiting for your friend to join…';
@@ -261,6 +319,9 @@ chrome.storage.onChanged.addListener(function (changes, namespace) {
             roomCode.textContent = value || '…';
         } else if (key === 'sync') {
             setSyncMode(value);
+        } else if (key === 'syncedTabs') {
+            syncedTabs = Array.isArray(value) ? value : [];
+            renderSync();
         } else if (key === 'theme') {
             setTheme(value);
         } else if (key === 'connectionError') {
@@ -276,7 +337,7 @@ function initPopup() {
 
     chrome.storage.local.get(
         ['state', 'connected', 'relayOpen', 'roomCode', 'sync', 'relayUrl',
-            'connectionError', 'displayName', 'peerName', 'theme'],
+            'connectionError', 'displayName', 'peerName', 'theme', 'syncedTabs'],
         function (result) {
             isConnected = !!result.connected;
             relayOpen = !!result.relayOpen;
@@ -284,6 +345,7 @@ function initPopup() {
             friendName = result.peerName || null;
             lastError = result.connectionError || null;
             setTheme(result.theme);
+            syncedTabs = Array.isArray(result.syncedTabs) ? result.syncedTabs : [];
             setSyncMode(result.sync);
             if (result.roomCode != null) roomCode.textContent = result.roomCode;
             if (result.relayUrl != null) relayUrl.value = result.relayUrl;
@@ -292,6 +354,24 @@ function initPopup() {
             setError(lastError);
         }
     );
+
+    // Opening the popup on a page is what can mark it for syncing. The port
+    // stays open exactly as long as the popup does, so the background also
+    // learns when no page is being pointed at any more.
+    const port = chrome.runtime.connect({ name: 'popup' });
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        const tab = tabs[0];
+        const site = siteOf(tab && tab.url);
+        currentTabId = tab ? tab.id : null;
+        currentTabHost = site ? site.host : null;
+        currentTabPattern = site ? site.pattern : null;
+        renderSync();
+        port.postMessage({ action: 'popupOpened', tabId: currentTabId, canSync: currentTabHost !== null });
+    });
+    chrome.permissions.contains({ origins: ALL_SITES }, function (granted) {
+        allSitesGranted = !!granted;
+        renderSync();
+    });
 
     newSessionBtn.addEventListener('click', function () {
         relayOpen = false;
@@ -342,7 +422,13 @@ function initPopup() {
 
     syncBtns.forEach(btn => {
         btn.addEventListener('click', function () {
-            chrome.storage.local.set({ sync: btn.dataset.sync });
+            const mode = btn.dataset.sync;
+            // The mode takes effect at once — activeTab from the click that
+            // opened the popup covers this tab — and only then is access
+            // asked for, since the prompt may close this popup.
+            chrome.runtime.sendMessage({ action: 'setSyncMode', mode, tabId: currentTabId });
+            if (mode === 'page' && currentTabPattern !== null) requestAccess([currentTabPattern]);
+            else if (mode === 'all') requestAccess(ALL_SITES);
         });
     });
 

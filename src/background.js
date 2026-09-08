@@ -101,7 +101,48 @@ function refreshAllSitesGranted() {
     });
 }
 refreshAllSitesGranted();
-chrome.permissions.onRemoved.addListener(refreshAllSitesGranted);
+
+// The pattern the popup asks access for on a given page; null where nothing
+// can be synced, or where the url is not visible to us at all.
+function sitePatternOf(url) {
+    let parsed;
+    try { parsed = new URL(url || ''); } catch (error) { return null; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.protocol + '//' + parsed.hostname + '/*';
+}
+
+// Access can be taken away in the browser's extension settings as well as
+// granted from the popup. A mode is only ever applied on the access it asked
+// for, so losing that access turns the mode off — and tells the synced tabs,
+// so they stop now rather than at their next reload.
+function dropModeWithoutAccess() {
+    syncStateLoaded.then(function () {
+        if (syncMode === 'all') {
+            chrome.permissions.contains({ origins: ALL_SITES }, function (granted) {
+                if (!granted && syncMode === 'all') setSyncMode('none');
+            });
+        } else if (syncMode === 'page') {
+            for (const tabId of [...syncedTabs]) {
+                chrome.tabs.get(tabId, function (tab) {
+                    // The url is only visible where we still hold access.
+                    const pattern = chrome.runtime.lastError || !tab ? null : sitePatternOf(tab.url);
+                    if (!pattern) {
+                        if (syncMode === 'page') setSyncMode('none');
+                        return;
+                    }
+                    chrome.permissions.contains({ origins: [pattern] }, function (granted) {
+                        if (!granted && syncMode === 'page') setSyncMode('none');
+                    });
+                });
+            }
+        }
+    });
+}
+
+chrome.permissions.onRemoved.addListener(function () {
+    refreshAllSitesGranted();
+    dropModeWithoutAccess();
+});
 
 // A mode that needs access is not applied until the access exists. The
 // popup asks, but the browser may close it to show the prompt — so the

@@ -88,7 +88,9 @@ if (window.contentScriptVideo !== true) {
 
         const videoState = {
             hostname: window.location.hostname,
-            id: video.id,
+            // Page-controlled and unbounded; capped so the sealed frame stays
+            // inside the relay's 512-character envelope.
+            id: video.id.slice(0, 64),
             srcLen: video.src.length,
             isPaused: video.paused,
             currentTime: video.currentTime

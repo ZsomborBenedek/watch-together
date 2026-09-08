@@ -109,15 +109,6 @@ function siteOf(url) {
     return { host: parsed.hostname, pattern: parsed.protocol + '//' + parsed.hostname + '/*' };
 }
 
-// Must run straight from a click, and after whatever the click was for: the
-// browser may close this popup to show its prompt, taking any pending
-// callback with it, so nothing depends on the answer.
-function requestAccess(origins) {
-    chrome.permissions.request({ origins }, function () {
-        void chrome.runtime.lastError;
-    });
-}
-
 function syncingHere() {
     return currentTabId !== null && syncedTabs.includes(currentTabId);
 }
@@ -423,12 +414,24 @@ function initPopup() {
     syncBtns.forEach(btn => {
         btn.addEventListener('click', function () {
             const mode = btn.dataset.sync;
-            // The mode takes effect at once — activeTab from the click that
-            // opened the popup covers this tab — and only then is access
-            // asked for, since the prompt may close this popup.
-            chrome.runtime.sendMessage({ action: 'setSyncMode', mode, tabId: currentTabId });
-            if (mode === 'page' && currentTabPattern !== null) requestAccess([currentTabPattern]);
-            else if (mode === 'all') requestAccess(ALL_SITES);
+            if (mode === 'none') {
+                chrome.runtime.sendMessage({ action: 'setSyncMode', mode, tabId: currentTabId });
+                return;
+            }
+            if (currentTabPattern === null) return;
+            // Ask first, apply on the answer. The background is told what is
+            // being asked for, and applies it on the grant event itself, so
+            // an answer given after the prompt has closed this popup still
+            // lands. A refusal changes nothing: the previous mode stays.
+            chrome.runtime.sendMessage({ action: 'requestSyncMode', mode, tabId: currentTabId, pattern: currentTabPattern });
+            const origins = mode === 'all' ? ALL_SITES : [currentTabPattern];
+            chrome.permissions.request({ origins }, function (granted) {
+                void chrome.runtime.lastError;
+                // Already-allowed sites answer without a prompt and without
+                // a grant event, so this is the path that applies them. A
+                // refusal needs nothing: the previous mode was never left.
+                if (granted) chrome.runtime.sendMessage({ action: 'setSyncMode', mode, tabId: currentTabId });
+            });
         });
     });
 

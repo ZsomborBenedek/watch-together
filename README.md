@@ -27,8 +27,8 @@ transmitted and stored is spelled out in [PRIVACY.md](PRIVACY.md).
    browser asks for access — **This page** for that one site, **All tabs**
    for every site; allow it and the mode survives reloads, and All tabs then
    reaches every page with a video even where you never opened the popup.
-   Decline, and it still works on the tabs you open the popup on, until they
-   reload. Nothing is granted at install.
+   Decline, and nothing changes — the previous setting stays. Nothing is
+   granted at install.
 
 Under **Settings** you can also give yourself a name, which is shown to the
 person you connect with (it travels inside the encrypted channel, so the relay

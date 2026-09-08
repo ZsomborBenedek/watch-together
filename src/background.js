@@ -93,8 +93,30 @@ function refreshAllSitesGranted() {
     });
 }
 refreshAllSitesGranted();
-chrome.permissions.onAdded.addListener(refreshAllSitesGranted);
 chrome.permissions.onRemoved.addListener(refreshAllSitesGranted);
+
+// A mode that needs access is not applied until the access exists. The
+// popup asks, but the browser may close it to show the prompt — so the
+// answer is taken from the grant event here, not from the popup: allow, and
+// the mode goes on even with the popup gone; refuse, and nothing fires, so
+// the previous mode simply stays. That is the revert.
+let pendingMode = null;
+
+function applyPendingIfGranted() {
+    const pending = pendingMode;
+    if (!pending) return;
+    const origins = pending.mode === 'all' ? ALL_SITES : [pending.pattern];
+    chrome.permissions.contains({ origins }, function (granted) {
+        if (!granted || pendingMode !== pending) return;
+        pendingMode = null;
+        setSyncMode(pending.mode, pending.tabId);
+    });
+}
+
+chrome.permissions.onAdded.addListener(function () {
+    refreshAllSitesGranted();
+    applyPendingIfGranted();
+});
 
 // The background's memory dies with it and comes back empty. Firefox ends an
 // idle event page after ~30s, so the very event that needs this — a reload
@@ -735,7 +757,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     } else if (request.action === 'relayChanged') {
         // Reopen the same room against the newly configured relay.
         if (roomCode) openSocket(roomCode);
+    } else if (request.action === 'requestSyncMode') {
+        const usable = (request.mode === 'all' || request.mode === 'page') &&
+            typeof request.tabId === 'number' && typeof request.pattern === 'string';
+        pendingMode = usable ? { mode: request.mode, tabId: request.tabId, pattern: request.pattern } : null;
     } else if (request.action === 'setSyncMode') {
+        pendingMode = null;
         syncStateLoaded.then(function () {
             setSyncMode(request.mode, request.tabId);
         });
@@ -757,6 +784,8 @@ chrome.runtime.onConnect.addListener(function (port) {
         // remembered as the popup's tab.
         const usable = typeof message.tabId === 'number' && message.canSync === true;
         popupTabId = usable ? message.tabId : null;
+        // A fresh popup means any earlier prompt has been answered by now.
+        pendingMode = null;
         // Stored state, not roomCode: a worker restarted a moment ago is
         // still rebuilding the session, and this popup may be why.
         chrome.storage.local.get('state', function (result) {

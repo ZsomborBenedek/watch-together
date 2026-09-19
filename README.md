@@ -4,6 +4,9 @@ Browser extension that synchronizes video playback on any site that has an HTML
 video element. Two people join the same room and either of them can pause, play
 or seek — the other's video follows along.
 
+[![Chrome Web Store](store/chrome-web-store-badge.svg)](https://chromewebstore.google.com/detail/hhckgkopdkepbjogdmgegeijndddpcbm)
+[![Firefox Add-ons](store/firefox-add-ons-badge.svg)](https://addons.mozilla.org/en-US/firefox/addon/watch-together/)
+
 Playback state travels over a WebSocket to a small Cloudflare Worker relay. A
 default one is built in; you can also deploy your own (see [server/](server/)).
 Peers agree a key directly with each other and encrypt everything they
